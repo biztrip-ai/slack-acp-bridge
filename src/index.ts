@@ -1,50 +1,94 @@
 #!/usr/bin/env node
-import "dotenv/config";
+import fs from "node:fs";
+import path from "node:path";
 import { parseArgs } from "node:util";
+import {
+  configTemplate,
+  defaultConfigPath,
+  loadConfig,
+  redactConfig,
+  type BridgeConfig,
+} from "./config.js";
+import { AgentHost } from "./host/host.js";
+import { createLogger, setLogLevel } from "./logger.js";
 import { buildManifest, SETUP_STEPS } from "./manifest.js";
+import { SlackBridge } from "./slack/app.js";
+
 process.title = "slack-acp-bridge";
 
-const USAGE = `Usage: slack-acp-bridge [command]
+const USAGE = `Usage: slack-acp-bridge [--config <path>] [command]
+
+Configuration: ~/.config/slack-acp-bridge/config.json (or --config / $SLACK_ACP_BRIDGE_CONFIG).
+Environment variables override individual keys (SLACK_BOT_TOKEN, SLACK_APP_TOKEN, AGENT, AGENT_CWD,
+PERMISSION_MODE, LOG_LEVEL, …).
 
 Commands:
-  (none)      run the bridge (reads .env / environment)
-  manifest    print the Slack app manifest JSON to stdout
-              --name <app name>   --description <text>   --steps (append setup steps to stderr)
+  (none)      run the bridge
+  init        write a config.json template (--bot-token, --app-token, --force)
+  config      print the resolved configuration (tokens redacted) and paths
+  manifest    print the Slack app manifest JSON (--name <app name>, --description <text>, --steps)
   help        show this message
 `;
 
-function cli(argv: string[]): boolean {
-  const [cmd, ...rest] = argv;
-  if (cmd === "help" || cmd === "--help" || cmd === "-h") {
-    process.stdout.write(USAGE);
-    return true;
-  }
-  if (cmd === "manifest") {
-    const { values } = parseArgs({
-      args: rest,
-      options: { name: { type: "string" }, description: { type: "string" }, steps: { type: "boolean" } },
-    });
-    process.stdout.write(JSON.stringify(buildManifest({ name: values.name, description: values.description }), null, 2) + "\n");
-    if (values.steps) process.stderr.write("\n" + SETUP_STEPS);
-    return true;
-  }
-  if (cmd) {
-    process.stderr.write(`unknown command: ${cmd}\n${USAGE}`);
-    process.exit(2);
-  }
-  return false;
+function fail(msg: string): never {
+  process.stderr.write(`${msg}\n`);
+  process.exit(2);
 }
 
-import { loadConfig } from "./config.js";
-import { AgentHost } from "./host/host.js";
-import { createLogger, setLogLevel } from "./logger.js";
-import { SlackBridge } from "./slack/app.js";
+async function cli(argv: string[]): Promise<BridgeConfig | undefined> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: {
+      config: { type: "string" },
+      name: { type: "string" },
+      description: { type: "string" },
+      steps: { type: "boolean" },
+      "bot-token": { type: "string" },
+      "app-token": { type: "string" },
+      force: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+  const cmd = positionals[0];
+  if (values.help || cmd === "help") {
+    process.stdout.write(USAGE);
+    return undefined;
+  }
+  switch (cmd) {
+    case undefined:
+      return loadConfig({ configPath: values.config });
+    case "manifest":
+      process.stdout.write(JSON.stringify(buildManifest({ name: values.name, description: values.description }), null, 2) + "\n");
+      if (values.steps) process.stderr.write("\n" + SETUP_STEPS);
+      return undefined;
+    case "config": {
+      const cfg = loadConfig({ configPath: values.config, allowMissingTokens: true });
+      process.stdout.write(
+        JSON.stringify({ configPath: cfg.configPath ?? `(none; defaults + env — would read ${defaultConfigPath()})`, ...redactConfig(cfg) }, null, 2) + "\n",
+      );
+      return undefined;
+    }
+    case "init": {
+      const file = values.config ?? defaultConfigPath();
+      if (fs.existsSync(file) && !values.force) fail(`${file} already exists (use --force to overwrite)`);
+      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(file, JSON.stringify(configTemplate({ botToken: values["bot-token"], appToken: values["app-token"] }), null, 2) + "\n", { mode: 0o600 });
+      process.stdout.write(`wrote ${file}\n`);
+      if (!values["bot-token"] || !values["app-token"]) {
+        process.stdout.write(`edit it and fill in slack.botToken / slack.appToken (run \`slack-acp-bridge manifest --steps\` to create the Slack app)\n`);
+      }
+      return undefined;
+    }
+    default:
+      fail(`unknown command: ${cmd}\n${USAGE}`);
+  }
+}
 
-async function main(): Promise<void> {
-  const cfg = loadConfig();
+async function run(cfg: BridgeConfig): Promise<void> {
   setLogLevel(cfg.logLevel);
   const log = createLogger("slack-acp-bridge");
-  log.info(`agent=${cfg.defaultAgent} cwd=${cfg.cwd} mode=${cfg.permissionMode} ambient=${cfg.ambient} state=${cfg.stateDir}`);
+  log.info(`config=${cfg.configPath ?? "(env only)"} agent=${cfg.defaultAgent} cwd=${cfg.cwd} mode=${cfg.permissionMode} ambient=${cfg.ambient} state=${cfg.stateDir}`);
 
   const host = new AgentHost(
     {
@@ -84,9 +128,11 @@ async function main(): Promise<void> {
   await bridge.start();
 }
 
-if (!cli(process.argv.slice(2))) main().catch((e) => {
-  const debug = (process.env.LOG_LEVEL ?? "").toLowerCase() === "debug";
-  const text = e instanceof Error ? (debug ? (e.stack ?? e.message) : e.message) : String(e);
-  process.stderr.write(`fatal: ${text}\n`);
-  process.exit(1);
-});
+cli(process.argv.slice(2))
+  .then((cfg) => (cfg ? run(cfg) : undefined))
+  .catch((e) => {
+    const debug = (process.env.LOG_LEVEL ?? "").toLowerCase() === "debug";
+    const text = e instanceof Error ? (debug ? (e.stack ?? e.message) : e.message) : String(e);
+    process.stderr.write(`fatal: ${text}\n`);
+    process.exit(1);
+  });

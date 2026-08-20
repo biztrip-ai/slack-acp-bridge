@@ -64,10 +64,11 @@ Changing scopes or events later requires reinstalling the app.
 Requires Node ≥ 22.13 and a logged-in `claude` CLI on the host.
 
 ```bash
-npm install
-cp .env.example .env   # fill in tokens, AGENT_CWD
-npm run build
-npm start          # process title is "slack-acp-bridge" (pkill -f slack-acp-bridge)
+npm install && npm run build
+node dist/index.js init      # writes ~/.config/slack-acp-bridge/config.json (mode 600)
+$EDITOR ~/.config/slack-acp-bridge/config.json   # tokens, cwd, …
+node dist/index.js config    # show the resolved configuration (tokens redacted)
+npm start                    # process title is "slack-acp-bridge" (pkill -f slack-acp-bridge)
 ```
 
 On macOS run under `caffeinate -dimsu -- npm start` so App Nap doesn't pause
@@ -75,26 +76,36 @@ the Socket Mode heartbeat.
 
 ### Configuration
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | — | required |
-| `SLACK_API_URL` | — | point at a Slack-compatible server (e.g. Flow) |
-| `AGENT` | `claude` | agent used for new sessions |
-| `AGENTS_FILE` | — | JSON `{ name: { command, args, env } }` adding more agents (see `agents.example.json`) |
-| `AGENT_CWD` (`CLAUDE_CWD`) | `$HOME` | working directory for every session |
-| `PERMISSION_MODE` (`CLAUDE_PERMISSION_MODE`) | `bypassPermissions` | default ACP session mode; override per thread with `!mode` |
-| `PERMISSION_TIMEOUT_S` | `600` | unanswered permission prompts are cancelled after this |
-| `CHANNEL_AGENTS` | — | JSON channel id → agent name |
-| `AMBIENT` | `0` | follow un-addressed thread replies; agent may abstain with `SILENT_SENTINEL` |
-| `SILENT_SENTINEL` | `<<SILENT>>` | |
-| `CLAUDE_MODEL` | agent default | Claude only |
-| `CLAUDE_SETTING_SOURCES` | `user,project,local` | which `~/.claude` / project config layers Claude loads |
-| `CLAUDE_CHROME` | `0` | `1` spawns Claude with `--chrome` |
-| `SYSTEM_PROMPT_APPEND` | Slack-mrkdwn guidance | appended to the agent system prompt; `""` disables |
-| `SESSION_IDLE_TIMEOUT_S` | `14400` | `0` disables the reaper |
-| `SESSION_REAP_INTERVAL_S` | `300` | |
-| `STATE_DIR` | `~/.local/state/slack-acp-bridge` | holds `sessions.db` |
-| `LOG_LEVEL` | `info` | `debug` logs full prompts, tool results, thinking |
+Configuration lives in **`~/.config/slack-acp-bridge/config.json`**
+(`$XDG_CONFIG_HOME` respected; override with `--config <path>` or
+`$SLACK_ACP_BRIDGE_CONFIG`). Unknown keys are rejected. Every key is optional
+except the Slack tokens. See [`config.example.json`](config.example.json).
+
+| Key | Default | Env override | Notes |
+| --- | --- | --- | --- |
+| `slack.botToken`, `slack.appToken` | — | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | required |
+| `slack.apiUrl` | real Slack | `SLACK_API_URL` | Slack-compatible server (e.g. Flow) |
+| `agent` | `claude` | `AGENT` | agent used for new sessions |
+| `agents` | `{}` | — | extra agents: `{ name: { command, args, env } }`; `claude` is built in |
+| `channelAgents` | `{}` | `CHANNEL_AGENTS` (JSON) | channel id → agent name |
+| `cwd` | `$HOME` | `AGENT_CWD` | working directory for every session |
+| `permissionMode` | `bypassPermissions` | `PERMISSION_MODE` | default ACP session mode; per thread with `!mode` |
+| `permissionTimeoutS` | `600` | `PERMISSION_TIMEOUT_S` | unanswered prompts are cancelled after this |
+| `claude.model` | agent default | `CLAUDE_MODEL` | Claude only |
+| `claude.settingSources` | `["user","project","local"]` | `CLAUDE_SETTING_SOURCES` | which `~/.claude` / project config layers Claude loads |
+| `claude.chrome` | `false` | `CLAUDE_CHROME` | spawn Claude with `--chrome` |
+| `systemPromptAppend` | Slack-mrkdwn guidance | `SYSTEM_PROMPT_APPEND` | `""` disables |
+| `ambient` | `false` | `AMBIENT` | follow un-addressed thread replies; agent may abstain |
+| `silentSentinel` | `<<SILENT>>` | `SILENT_SENTINEL` | |
+| `session.idleTimeoutS` | `14400` | `SESSION_IDLE_TIMEOUT_S` | `0` disables the reaper |
+| `session.reapIntervalS` | `300` | `SESSION_REAP_INTERVAL_S` | |
+| `stateDir` | `~/.local/state/slack-acp-bridge` | `STATE_DIR` | holds `sessions.db` and uploads |
+| `logLevel` | `info` | `LOG_LEVEL` | `debug` logs full prompts, tool results, thinking |
+
+Environment variables override file values, which override defaults.
+
+Runtime state (not configuration) lives in `stateDir`: `sessions.db` (thread →
+session map and per-thread `!agent`/`!mode` preferences) and `uploads/`.
 
 ### About `PERMISSION_MODE`
 

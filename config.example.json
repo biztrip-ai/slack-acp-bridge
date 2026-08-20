@@ -1,0 +1,23 @@
+{
+  "slack": {
+    "botToken": "xoxb-REPLACE-ME",
+    "appToken": "xapp-REPLACE-ME"
+  },
+  "agent": "claude",
+  "agents": {
+    "codex": { "command": "codex-acp", "args": [] },
+    "gemini": { "command": "gemini", "args": ["--experimental-acp"] }
+  },
+  "channelAgents": {},
+  "cwd": "/path/to/repo",
+  "permissionMode": "bypassPermissions",
+  "permissionTimeoutS": 600,
+  "claude": {
+    "settingSources": ["user", "project", "local"],
+    "chrome": false
+  },
+  "ambient": false,
+  "silentSentinel": "<<SILENT>>",
+  "session": { "idleTimeoutS": 14400, "reapIntervalS": 300 },
+  "logLevel": "info"
+}
