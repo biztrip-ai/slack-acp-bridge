@@ -1,6 +1,40 @@
 #!/usr/bin/env node
 import "dotenv/config";
+import { parseArgs } from "node:util";
+import { buildManifest, SETUP_STEPS } from "./manifest.js";
 process.title = "slack-acp-bridge";
+
+const USAGE = `Usage: slack-acp-bridge [command]
+
+Commands:
+  (none)      run the bridge (reads .env / environment)
+  manifest    print the Slack app manifest JSON to stdout
+              --name <app name>   --description <text>   --steps (append setup steps to stderr)
+  help        show this message
+`;
+
+function cli(argv: string[]): boolean {
+  const [cmd, ...rest] = argv;
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") {
+    process.stdout.write(USAGE);
+    return true;
+  }
+  if (cmd === "manifest") {
+    const { values } = parseArgs({
+      args: rest,
+      options: { name: { type: "string" }, description: { type: "string" }, steps: { type: "boolean" } },
+    });
+    process.stdout.write(JSON.stringify(buildManifest({ name: values.name, description: values.description }), null, 2) + "\n");
+    if (values.steps) process.stderr.write("\n" + SETUP_STEPS);
+    return true;
+  }
+  if (cmd) {
+    process.stderr.write(`unknown command: ${cmd}\n${USAGE}`);
+    process.exit(2);
+  }
+  return false;
+}
+
 import { loadConfig } from "./config.js";
 import { AgentHost } from "./host/host.js";
 import { createLogger, setLogLevel } from "./logger.js";
@@ -50,7 +84,7 @@ async function main(): Promise<void> {
   await bridge.start();
 }
 
-main().catch((e) => {
+if (!cli(process.argv.slice(2))) main().catch((e) => {
   const debug = (process.env.LOG_LEVEL ?? "").toLowerCase() === "debug";
   const text = e instanceof Error ? (debug ? (e.stack ?? e.message) : e.message) : String(e);
   process.stderr.write(`fatal: ${text}\n`);

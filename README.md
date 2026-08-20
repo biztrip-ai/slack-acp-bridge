@@ -46,10 +46,11 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
 
 ### Slack app
 
-1. <https://api.slack.com/apps> → **Create New App** → **From a manifest** →
-   paste [`docs/slack-app-manifest.json`](docs/slack-app-manifest.json). It
-   enables Socket Mode, interactivity (for permission buttons), the DM tab, the
-   slash commands, and these bot scopes: `app_mentions:read`, `chat:write`,
+1. Print the manifest (`npx slack-acp-bridge manifest --name mybot --steps`, or
+   use [`docs/slack-app-manifest.json`](docs/slack-app-manifest.json)), then at
+   <https://api.slack.com/apps> → **Create New App** → **From a manifest** →
+   paste it. It enables Socket Mode, interactivity (for permission buttons), the
+   DM tab, the slash commands, and these bot scopes: `app_mentions:read`, `chat:write`,
    `commands`, `channels:history`, `groups:history`, `im:history`,
    `mpim:history`, `im:read`, `im:write`, `users:read`, `files:read`.
 2. **Basic Information → App-Level Tokens** → create one with

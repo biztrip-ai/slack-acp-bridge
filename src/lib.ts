@@ -8,3 +8,4 @@ export { SlackStreamer } from "./slack/streamer.js";
 export { loadConfig, bundledClaudeAgent, SLACK_FORMATTING_PROMPT } from "./config.js";
 export type { BridgeConfig } from "./config.js";
 export { createLogger, setLogLevel } from "./logger.js";
+export { buildManifest, BOT_SCOPES, BOT_EVENTS, SLASH_COMMANDS, SETUP_STEPS } from "./manifest.js";
