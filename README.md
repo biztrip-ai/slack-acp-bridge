@@ -76,7 +76,7 @@ slack-acp-bridge                           # run (process title "slack-acp-bridg
 Or without installing: `npx slack-acp-bridge …`. From a checkout:
 `npm install && npm run build && npm start`.
 
-On macOS run under `caffeinate -dimsu -- npm start` so App Nap doesn't pause
+On macOS run under `caffeinate -dimsu -- slack-acp-bridge` so App Nap doesn't pause
 the Socket Mode heartbeat.
 
 ### Configuration
