@@ -59,17 +59,22 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
 
 Changing scopes or events later requires reinstalling the app.
 
-### Run
+### Install & run
 
-Requires Node ≥ 22.13 and a logged-in `claude` CLI on the host.
+Requires Node ≥ 22.13 and a logged-in `claude` CLI on the host (`claude` must
+run from your shell without prompting).
 
 ```bash
-npm install && npm run build
-node dist/index.js init      # writes ~/.config/slack-acp-bridge/config.json (mode 600)
+npm install -g slack-acp-bridge
+slack-acp-bridge manifest --steps          # create the Slack app from this
+slack-acp-bridge init                      # writes ~/.config/slack-acp-bridge/config.json (mode 600)
 $EDITOR ~/.config/slack-acp-bridge/config.json   # tokens, cwd, …
-node dist/index.js config    # show the resolved configuration (tokens redacted)
-npm start                    # process title is "slack-acp-bridge" (pkill -f slack-acp-bridge)
+slack-acp-bridge config                    # resolved configuration, tokens redacted
+slack-acp-bridge                           # run (process title "slack-acp-bridge")
 ```
+
+Or without installing: `npx slack-acp-bridge …`. From a checkout:
+`npm install && npm run build && npm start`.
 
 On macOS run under `caffeinate -dimsu -- npm start` so App Nap doesn't pause
 the Socket Mode heartbeat.
@@ -117,6 +122,28 @@ blast radius use `acceptEdits` or `default` (globally, or per thread with
 anyone in the thread can click; unanswered prompts cancel after
 `PERMISSION_TIMEOUT_S`. Requests for threads the bridge can't map (shouldn't
 happen) fall back to auto-allow.
+
+## Library use
+
+The ACP host is usable without Slack:
+
+```ts
+import { AgentHost, bundledClaudeAgent, createLogger } from "slack-acp-bridge";
+
+const host = new AgentHost(
+  { agents: { claude: bundledClaudeAgent() }, defaultAgent: "claude", cwd: process.cwd(),
+    stateDir: "/tmp/acp-state", idleTimeoutS: 0, reapIntervalS: 60 },
+  createLogger("demo"),
+);
+const session = await host.getOrCreate("demo:1", { channel: "demo", threadTs: null });
+for await (const ev of session.send("say hi")) if (ev.kind === "text") process.stdout.write(ev.text);
+await host.close();
+```
+
+`AgentHost` spawns agents, maps keys to sessions (SQLite, `session/load` on
+re-attach), serializes turns per session and emits a normalized `TurnEvent`
+stream. `host.onPermission(...)` receives permission requests; without a
+handler they are auto-allowed.
 
 ## Development
 
