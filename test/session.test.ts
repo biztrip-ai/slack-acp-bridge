@@ -7,9 +7,13 @@ import { createLogger } from "../src/logger.js";
 function fakeAgent() {
   let sink: UpdateSink | undefined;
   const gates: Array<() => void> = [];
+  let cancelled = 0;
   const agent = {
     bindSink: (_id: string, s: UpdateSink | undefined) => {
       sink = s;
+    },
+    cancel: async () => {
+      cancelled++;
     },
     prompt: async (p: { sessionId: string; prompt: { type: string; text: string }[] }) => {
       await new Promise<void>((r) => gates.push(r));
@@ -23,7 +27,7 @@ function fakeAgent() {
     while (!gates.length) await new Promise((r) => setImmediate(r));
     gates.shift()!();
   };
-  return { agent, release };
+  return { agent, release, cancelCount: () => cancelled };
 }
 
 async function collect(it: AsyncIterable<{ kind: string; text?: string; turn?: number }>) {
@@ -39,7 +43,7 @@ async function collect(it: AsyncIterable<{ kind: string; text?: string; turn?: n
 describe("Session", () => {
   it("serializes turns and emits turn_start only when the turn actually begins", async () => {
     const { agent, release } = fakeAgent();
-    const s = new Session("k", agent, "sid", createLogger("t"));
+    const s = new Session("k", "fake", agent, "sid", { channel: "C", threadTs: null }, createLogger("t"));
     const a = collect(s.send("one"));
     const b = collect(s.send("two"));
     expect(s.busy).toBe(true);
@@ -48,5 +52,21 @@ describe("Session", () => {
     await release(); // finish turn 2
     expect(await b).toEqual(["start:2", "echo:", "two", "done"]);
     expect(s.busy).toBe(false);
+  });
+});
+
+describe("Session.cancel", () => {
+  it("cancels the active turn and drops queued turns without sending them", async () => {
+    const { agent, release, cancelCount } = fakeAgent();
+    const s = new Session("k", "fake", agent, "sid", { channel: "C", threadTs: null }, createLogger("t"));
+    const a = collect(s.send("one"));
+    const b = collect(s.send("two"));
+    await new Promise((r) => setImmediate(r));
+    expect(await s.cancel()).toBe(true);
+    expect(cancelCount()).toBe(1);
+    await release(); // the fake finishes turn 1 normally
+    expect(await a).toEqual(["start:1", "echo:", "one", "done"]);
+    expect(await b).toEqual(["start:2", "done"]); // never prompted
+    expect(await s.cancel()).toBe(false);
   });
 });

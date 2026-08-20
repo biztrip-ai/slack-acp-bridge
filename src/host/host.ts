@@ -5,11 +5,21 @@ import { isDebug, truncate } from "../logger.js";
 import { AgentProcess } from "./agent-process.js";
 import { AsyncQueue } from "./async-queue.js";
 import { SessionStore } from "./session-store.js";
-import type { AgentConfig, PermissionPolicy, TurnEvent } from "./types.js";
+import {
+  allowAllPolicy,
+  type AgentConfig,
+  type ModeState,
+  type PermissionDecision,
+  type PermissionRequest,
+  type PromptBlock,
+  type TurnEvent,
+} from "./types.js";
 
 export interface HostConfig {
   agents: Record<string, AgentConfig>;
   defaultAgent: string;
+  /** Per-channel default agent overrides (channel id → agent name). */
+  channelAgents?: Record<string, string>;
   cwd: string;
   permissionMode?: string;
   systemPromptAppend?: string;
@@ -17,7 +27,6 @@ export interface HostConfig {
   stateDir: string;
   idleTimeoutS: number; // 0 = no reaper
   reapIntervalS: number;
-  permissionPolicy?: PermissionPolicy;
 }
 
 export interface ThreadRef {
@@ -25,23 +34,36 @@ export interface ThreadRef {
   threadTs: string | null;
 }
 
+/** Asked when an agent needs a permission decision for a live session. */
+export type PermissionHandler = (
+  session: Session,
+  req: PermissionRequest,
+  signal: AbortSignal,
+) => Promise<PermissionDecision>;
+
 /** One Slack thread ↔ one ACP session. Turns are serialized per session. */
 export class Session {
   readonly key: string;
+  readonly agentName: string;
   readonly agent: AgentProcess;
   readonly sessionId: string;
+  readonly ref: ThreadRef;
+  modes?: ModeState;
   private readonly log: Logger;
   private turn = 0;
   private chain: Promise<void> = Promise.resolve();
   private active = 0;
+  private cancelEpoch = 0;
   lastUsedAt = Date.now();
   /** Set when the agent reported this session can no longer take prompts. */
   dead = false;
 
-  constructor(key: string, agent: AgentProcess, sessionId: string, log: Logger) {
+  constructor(key: string, agentName: string, agent: AgentProcess, sessionId: string, ref: ThreadRef, log: Logger) {
     this.key = key;
+    this.agentName = agentName;
     this.agent = agent;
     this.sessionId = sessionId;
+    this.ref = ref;
     this.log = log;
   }
 
@@ -49,33 +71,37 @@ export class Session {
     return this.active > 0;
   }
 
-  get nextTurnNumber(): number {
-    return this.turn + 1;
-  }
-
   /**
    * Queue a prompt. Events start flowing once earlier turns on this session
    * finish; the first event is always `turn_start`.
    */
-  send(text: string): AsyncIterable<TurnEvent> {
+  send(prompt: string | PromptBlock[]): AsyncIterable<TurnEvent> {
+    const blocks: PromptBlock[] = typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt;
+    const preview = blocks.map((b) => (b.type === "text" ? b.text : `[${b.type}]`)).join(" ");
     const q = new AsyncQueue<TurnEvent>();
+    const epoch = this.cancelEpoch;
     this.active++;
     const run = async () => {
       this.lastUsedAt = Date.now();
       const turn = ++this.turn;
-      this.log.info(`turn ${turn}: user prompt (${text.length} chars): ${JSON.stringify(truncate(text, 200))}`);
-      if (isDebug()) this.log.debug(`turn ${turn}: full prompt:\n${text}`);
       q.push({ kind: "turn_start", turn });
+      if (this.cancelEpoch > epoch) {
+        // A /stop arrived while this turn was queued: never send it.
+        this.log.info(`turn ${turn}: dropped (cancelled while queued)`);
+        q.push({ kind: "done", stopReason: "cancelled" });
+        q.close();
+        this.active--;
+        return;
+      }
+      this.log.info(`turn ${turn}: user prompt (${preview.length} chars): ${JSON.stringify(truncate(preview, 200))}`);
+      if (isDebug()) this.log.debug(`turn ${turn}: full prompt:\n${preview}`);
 
       const sink = (n: SessionNotification) => {
         for (const ev of this.toEvents(n, turn)) q.push(ev);
       };
       this.agent.bindSink(this.sessionId, sink);
       try {
-        const res = await this.agent.prompt({
-          sessionId: this.sessionId,
-          prompt: [{ type: "text", text }],
-        });
+        const res = await this.agent.prompt({ sessionId: this.sessionId, prompt: blocks });
         this.log.info(`turn ${turn}: stop=${res.stopReason}` + (res.usage ? ` usage=${JSON.stringify(res.usage)}` : ""));
         q.push({ kind: "done", stopReason: res.stopReason as StopReason, usage: res.usage ?? undefined });
         q.close();
@@ -91,6 +117,18 @@ export class Session {
     };
     this.chain = this.chain.then(run, run);
     return q;
+  }
+
+  /** Cancel the in-flight turn and drop anything queued behind it. */
+  async cancel(): Promise<boolean> {
+    if (!this.busy) return false;
+    this.cancelEpoch++;
+    try {
+      await this.agent.cancel(this.sessionId);
+    } catch (e) {
+      this.log.warn("cancel failed", e);
+    }
+    return true;
   }
 
   private *toEvents(n: SessionNotification, turn: number): Iterable<TurnEvent> {
@@ -133,6 +171,10 @@ export class Session {
         yield { kind: "tool_update", id: u.toolCallId, status: u.status ?? undefined, title: u.title ?? undefined, isError, summary };
         break;
       }
+      case "current_mode_update":
+        if (this.modes) this.modes = { ...this.modes, currentModeId: u.currentModeId };
+        this.log.info(`turn ${turn}: mode → ${u.currentModeId}`);
+        break;
       case "usage_update":
         this.log.debug(`turn ${turn}: usage`, u);
         break;
@@ -161,6 +203,7 @@ export class AgentHost {
   private readonly sessions = new Map<string, Session>();
   private readonly creating = new Map<string, Promise<Session>>();
   private reaper?: NodeJS.Timeout;
+  private permissionHandler?: PermissionHandler;
 
   constructor(cfg: HostConfig, log: Logger) {
     this.cfg = cfg;
@@ -172,12 +215,28 @@ export class AgentHost {
     return Object.keys(this.cfg.agents);
   }
 
+  /** Install the interactive permission handler (e.g. Slack buttons). */
+  onPermission(handler: PermissionHandler): void {
+    this.permissionHandler = handler;
+  }
+
+  private async routePermission(req: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision> {
+    const session = [...this.sessions.values()].find((s) => s.sessionId === req.sessionId);
+    if (!session || !this.permissionHandler) return allowAllPolicy(req, signal);
+    try {
+      return await this.permissionHandler(session, req, signal);
+    } catch (e) {
+      this.log.warn(`permission handler failed for ${session.key}; cancelling`, e);
+      return { cancelled: true };
+    }
+  }
+
   private agentFor(name: string): AgentProcess {
     let a = this.agents.get(name);
     if (!a) {
       const conf = this.cfg.agents[name];
       if (!conf) throw new Error(`unknown agent "${name}"`);
-      a = new AgentProcess(conf, this.log, this.cfg.permissionPolicy);
+      a = new AgentProcess(conf, this.log, (req, signal) => this.routePermission(req, signal));
       a.onExit(() => {
         // In-memory sessions died with the process; rows stay so they can be loaded again.
         for (const [key, s] of this.sessions) {
@@ -202,12 +261,21 @@ export class AgentHost {
     return s && !s.dead ? s : undefined;
   }
 
-  async getOrCreate(key: string, ref: ThreadRef, agentName = this.cfg.defaultAgent): Promise<Session> {
+  /** Agent a new session for this thread would use. */
+  agentNameFor(key: string, channel: string): string {
+    return (
+      this.store.getPrefs(key).agent ??
+      this.cfg.channelAgents?.[channel] ??
+      this.cfg.defaultAgent
+    );
+  }
+
+  async getOrCreate(key: string, ref: ThreadRef): Promise<Session> {
     const live = this.get(key);
     if (live) return live;
     let p = this.creating.get(key);
     if (!p) {
-      p = this.create(key, ref, agentName).finally(() => this.creating.delete(key));
+      p = this.create(key, ref).finally(() => this.creating.delete(key));
       this.creating.set(key, p);
     }
     return p;
@@ -224,17 +292,20 @@ export class AgentHost {
     return meta;
   }
 
-  private async create(key: string, ref: ThreadRef, agentName: string): Promise<Session> {
+  private async create(key: string, ref: ThreadRef): Promise<Session> {
     const slog = this.log.child(`session[${key}]`);
+    const prefs = this.store.getPrefs(key);
     const row = this.store.get(key);
-    if (row) agentName = row.agent in this.cfg.agents ? row.agent : agentName;
+    let agentName = this.agentNameFor(key, ref.channel);
+    // A persisted session pins its agent unless the user explicitly changed it.
+    if (row && !prefs.agent && row.agent in this.cfg.agents) agentName = row.agent;
     const agent = this.agentFor(agentName);
     await agent.ensureStarted();
 
     const cwd = this.cfg.cwd;
     const mcpServers: never[] = [];
     let sessionId: string | undefined;
-    let modes: { currentModeId: string; availableModes: { id: string }[] } | null | undefined;
+    let modes: ModeState | null | undefined;
 
     if (row && row.agent === agentName && agent.caps.loadSession) {
       slog.info(`loading prior session ${row.sessionId}`);
@@ -243,7 +314,7 @@ export class AgentHost {
       try {
         const res = await agent.loadSession({ sessionId: row.sessionId, cwd, mcpServers, _meta: this.sessionMeta() });
         sessionId = row.sessionId;
-        modes = (res as { modes?: typeof modes } | void)?.modes;
+        modes = (res as { modes?: ModeState | null } | void)?.modes;
         slog.info("loaded");
       } catch (e) {
         slog.warn(`load failed; starting fresh`, e);
@@ -253,14 +324,16 @@ export class AgentHost {
     }
 
     if (!sessionId) {
-      slog.info("creating new session");
+      slog.info(`creating new session (agent=${agentName})`);
       const res = await agent.newSession({ cwd, mcpServers, _meta: this.sessionMeta() });
       sessionId = res.sessionId;
-      modes = res.modes;
+      modes = res.modes as ModeState | null | undefined;
       slog.info(`created ${sessionId}`);
     }
 
-    await this.applyMode(agent, sessionId, modes, slog);
+    const s = new Session(key, agentName, agent, sessionId, ref, slog);
+    s.modes = modes ?? undefined;
+    await this.applyMode(s, prefs.mode ?? this.cfg.permissionMode);
 
     const now = Date.now();
     this.store.put({
@@ -273,37 +346,54 @@ export class AgentHost {
       createdAt: row?.createdAt ?? now,
       lastUsedAt: now,
     });
-    const s = new Session(key, agent, sessionId, slog);
     this.sessions.set(key, s);
     return s;
   }
 
-  private async applyMode(
-    agent: AgentProcess,
-    sessionId: string,
-    modes: { currentModeId: string; availableModes: { id: string }[] } | null | undefined,
-    slog: Logger,
-  ): Promise<void> {
-    const want = this.cfg.permissionMode;
-    if (!want || !modes) return;
-    if (modes.currentModeId === want) return;
+  private async applyMode(s: Session, want: string | undefined): Promise<string | undefined> {
+    const modes = s.modes;
+    if (!want || !modes) return undefined;
+    if (modes.currentModeId === want) return want;
     if (!modes.availableModes.some((m) => m.id === want)) {
-      slog.warn(`permission mode "${want}" not offered (available: ${modes.availableModes.map((m) => m.id).join(", ")}); keeping "${modes.currentModeId}"`);
-      return;
+      const msg = `mode "${want}" not offered (available: ${modes.availableModes.map((m) => m.id).join(", ")}); keeping "${modes.currentModeId}"`;
+      this.log.warn(`${s.key}: ${msg}`);
+      throw new Error(msg);
     }
-    try {
-      await agent.setMode(sessionId, want);
-      slog.info(`mode set to ${want}`);
-    } catch (e) {
-      slog.warn(`set_mode ${want} failed`, e);
-    }
+    await s.agent.setMode(s.sessionId, want);
+    s.modes = { ...modes, currentModeId: want };
+    this.log.info(`${s.key}: mode set to ${want}`);
+    return want;
+  }
+
+  /** Set (and remember) the permission mode for a thread. Returns the resulting mode state. */
+  async setMode(key: string, ref: ThreadRef, modeId: string): Promise<ModeState | undefined> {
+    const s = await this.getOrCreate(key, ref);
+    await this.applyMode(s, modeId);
+    this.store.setPrefs(key, { mode: modeId });
+    return s.modes;
+  }
+
+  /** Switch a thread's agent. Any existing session is dropped; returns true if one was. */
+  async setAgent(key: string, name: string): Promise<boolean> {
+    if (!this.cfg.agents[name]) throw new Error(`unknown agent "${name}" (known: ${this.agentNames().join(", ")})`);
+    this.store.setPrefs(key, { agent: name });
+    const had = !!this.sessions.get(key) || !!this.store.get(key);
+    if (had) await this.drop(key, { keepPrefs: true });
+    return had;
+  }
+
+  /** Cancel the running turn on a thread (and anything queued behind it). */
+  async cancel(key: string): Promise<boolean> {
+    const s = this.get(key);
+    return s ? s.cancel() : false;
   }
 
   /** Forget a thread's session entirely (the /clear semantics). */
-  async drop(key: string): Promise<DropResult> {
+  async drop(key: string, opts: { keepPrefs?: boolean } = {}): Promise<DropResult> {
     const s = this.sessions.get(key);
     this.sessions.delete(key);
     const hadRow = this.store.delete(key);
+    if (!opts.keepPrefs) this.store.setPrefs(key, {});
     if (!s) return hadRow ? "cleared" : "absent";
     if (s.busy) {
       void s.idle().then(() => this.closeQuietly(s));

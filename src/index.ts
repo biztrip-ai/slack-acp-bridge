@@ -10,12 +10,13 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   setLogLevel(cfg.logLevel);
   const log = createLogger("slack-acp-bridge");
-  log.info(`agent=${cfg.defaultAgent} cwd=${cfg.cwd} mode=${cfg.permissionMode} state=${cfg.stateDir}`);
+  log.info(`agent=${cfg.defaultAgent} cwd=${cfg.cwd} mode=${cfg.permissionMode} ambient=${cfg.ambient} state=${cfg.stateDir}`);
 
   const host = new AgentHost(
     {
       agents: cfg.agents,
       defaultAgent: cfg.defaultAgent,
+      channelAgents: cfg.channelAgents,
       cwd: cfg.cwd,
       permissionMode: cfg.permissionMode,
       systemPromptAppend: cfg.systemPromptAppend,

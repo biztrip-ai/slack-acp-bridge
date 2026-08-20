@@ -116,11 +116,10 @@ export class AgentProcess {
       })
       .onRequest(methods.client.session.requestPermission, async (ctx) => {
         const req = ctx.params;
-        const decision = await this.policy({
-          sessionId: req.sessionId,
-          toolCall: req.toolCall,
-          options: req.options,
-        });
+        const decision = await this.policy(
+          { sessionId: req.sessionId, toolCall: req.toolCall, options: req.options },
+          ctx.signal,
+        );
         const title = req.toolCall.title ?? "(tool)";
         if ("cancelled" in decision) {
           this.log.info(`permission cancelled: ${title}`);

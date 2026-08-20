@@ -1,4 +1,4 @@
-import type { StopReason, ToolCallUpdate, ToolCall, PermissionOption } from "@agentclientprotocol/sdk";
+import type { StopReason, ToolCallUpdate, ToolCall, PermissionOption, ContentBlock } from "@agentclientprotocol/sdk";
 
 /** How to launch an ACP agent process. */
 export interface AgentConfig {
@@ -7,6 +7,8 @@ export interface AgentConfig {
   args?: string[];
   env?: Record<string, string>;
 }
+
+export type PromptBlock = ContentBlock;
 
 /** Normalized per-turn events the Slack layer consumes (the old Python `Chunk`). */
 export type TurnEvent =
@@ -24,12 +26,12 @@ export type PermissionRequest = {
 };
 
 export type PermissionDecision = { optionId: string } | { cancelled: true };
-export type PermissionPolicy = (req: PermissionRequest) => Promise<PermissionDecision> | PermissionDecision;
+export type PermissionPolicy = (
+  req: PermissionRequest,
+  signal: AbortSignal,
+) => Promise<PermissionDecision> | PermissionDecision;
 
-/**
- * Default policy: pick an allow-shaped option. This mirrors running Claude in
- * `bypassPermissions` — the Slack layer has no approval UI yet (phase 2).
- */
+/** Pick an allow-shaped option without asking anyone. */
 export const allowAllPolicy: PermissionPolicy = (req) => {
   const pick =
     req.options.find((o) => o.kind === "allow_once") ??
@@ -37,3 +39,5 @@ export const allowAllPolicy: PermissionPolicy = (req) => {
     req.options[0];
   return pick ? { optionId: pick.optionId } : { cancelled: true };
 };
+
+export type ModeState = { currentModeId: string; availableModes: { id: string; name: string }[] };

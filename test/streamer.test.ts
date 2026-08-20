@@ -82,3 +82,22 @@ describe("SlackStreamer", () => {
     expect(slack.updates[0]!.text).not.toContain("queued");
   });
 });
+
+describe("SlackStreamer lazy mode", () => {
+  it("posts nothing until real text arrives", async () => {
+    const slack = new FakeSlack();
+    const s = new SlackStreamer(slack, "C1", "1.0", log, { lazy: true, now: () => 0 });
+    await s.open();
+    expect(slack.posts).toHaveLength(0);
+    await s.markActive();
+    await s.flush(true);
+    expect(slack.posts).toHaveLength(0);
+    await s.append("hello");
+    await s.flush(true);
+    expect(slack.posts).toHaveLength(1);
+    expect(slack.posts[0]!.text).toBe("hello");
+    await s.append(" world");
+    await s.flush(true);
+    expect(slack.updates.at(-1)!.text).toBe("hello world");
+  });
+});

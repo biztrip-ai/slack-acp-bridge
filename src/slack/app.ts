@@ -1,8 +1,14 @@
+import path from "node:path";
 import bolt from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { BridgeConfig } from "../config.js";
-import type { AgentHost } from "../host/host.js";
+import type { AgentHost, Session, ThreadRef } from "../host/host.js";
+import type { PromptBlock } from "../host/types.js";
 import type { Logger } from "../logger.js";
+import { AbstainBuffer } from "./abstain.js";
+import { HELP_TEXT, parseBangCommand, type CommandName } from "./commands.js";
+import { attachmentsToBlocks, type SlackFile } from "./files.js";
+import { PERMISSION_ACTION_PREFIX, PermissionPrompter } from "./permissions.js";
 import { SlackStreamer } from "./streamer.js";
 
 const { App, LogLevel } = bolt;
@@ -16,7 +22,11 @@ interface InboundMessage {
   text?: string;
   ts: string;
   thread_ts?: string;
+  files?: SlackFile[];
 }
+
+/** Message subtypes that still carry a user message we should act on. */
+const ALLOWED_SUBTYPES = new Set([undefined, "file_share", "thread_broadcast"]);
 
 export function sessionKey(ev: InboundMessage): string {
   if (ev.channel_type === "im") return `dm:${ev.channel}`;
@@ -28,12 +38,22 @@ export function threadTsForReply(ev: InboundMessage): string | undefined {
   return ev.thread_ts ?? ev.ts;
 }
 
+interface CommandCtx {
+  key: string;
+  ref: ThreadRef;
+  channel: string;
+  replyThread?: string;
+  userId: string;
+}
+
 export class SlackBridge {
   private readonly app: InstanceType<typeof App>;
   private readonly log: Logger;
+  private readonly prompter: PermissionPrompter;
   private botUserId?: string;
   /** Threads we've confirmed the bot has posted in (per process; survives /clear). */
   private readonly botThreads = new Set<string>();
+  private readonly userNames = new Map<string, string>();
 
   constructor(
     private readonly cfg: BridgeConfig,
@@ -48,6 +68,10 @@ export class SlackBridge {
       logLevel: cfg.logLevel.toLowerCase() === "debug" ? LogLevel.DEBUG : LogLevel.WARN,
       clientOptions: cfg.slackApiUrl ? { slackApiUrl: cfg.slackApiUrl } : undefined,
     });
+    this.prompter = new PermissionPrompter(this.app.client, this.log, cfg.permissionTimeoutS * 1000);
+    host.onPermission((session, req, signal) =>
+      this.prompter.ask(session.ref.channel, session.ref.threadTs ?? undefined, req, signal),
+    );
     this.register();
   }
 
@@ -57,64 +81,104 @@ export class SlackBridge {
 
   private register(): void {
     this.app.event("app_mention", async ({ event, client }) => {
-      await this.handleUserMessage(event as unknown as InboundMessage, client);
+      await this.handleUserMessage(event as unknown as InboundMessage, client, true);
     });
 
     this.app.event("message", async ({ event, client }) => {
       const ev = event as unknown as InboundMessage;
       // Skip bot's own messages, edits, joins, etc.
-      if (ev.bot_id || ev.subtype) return;
+      if (ev.bot_id || !ALLOWED_SUBTYPES.has(ev.subtype)) return;
       const botId = await this.getBotUserId(client);
+      const mentioned = (ev.text ?? "").includes(`<@${botId}>`);
 
       // In channels: respond to any reply inside a thread the bot has
-      // participated in. `app_mention` covers the opening message, so skip
-      // messages that mention the bot here to avoid double-handling.
+      // participated in. `app_mention` covers mentions, so skip those here.
       if (ev.channel_type !== "im") {
         if (!ev.thread_ts) return;
-        if ((ev.text ?? "").includes(`<@${botId}>`)) return;
+        if (mentioned) return;
         const key = sessionKey(ev);
         if (!this.host.get(key) && !(await this.botParticipatesInThread(client, ev.channel, ev.thread_ts, botId))) {
           return;
         }
       }
-      await this.handleUserMessage(ev, client);
+      await this.handleUserMessage(ev, client, mentioned);
     });
 
-    this.app.command("/clear", async ({ command, ack, client }) => {
-      await ack();
-      const channelId = command.channel_id;
-      const threadTs = (command as unknown as { thread_ts?: string }).thread_ts;
-      const userId = command.user_id;
+    for (const name of ["clear", "stop", "agent", "mode", "help"] as const) {
+      this.app.command(`/${name}`, async ({ command, ack, client }) => {
+        await ack();
+        const channel = command.channel_id;
+        const threadTs = (command as unknown as { thread_ts?: string }).thread_ts;
+        let ctx: CommandCtx;
+        if (channel.startsWith("D")) {
+          ctx = { key: `dm:${channel}`, ref: { channel, threadTs: null }, channel, userId: command.user_id };
+        } else if (threadTs) {
+          ctx = { key: `thread:${channel}:${threadTs}`, ref: { channel, threadTs }, channel, replyThread: threadTs, userId: command.user_id };
+        } else {
+          await client.chat.postEphemeral({ channel, user: command.user_id, text: `Run \`/${name}\` inside a thread with me, or in our DM.` });
+          return;
+        }
+        const text = await this.runCommand(name, command.text ?? "", ctx);
+        await client.chat.postMessage({ channel, thread_ts: ctx.replyThread, text });
+      });
+    }
 
-      let key: string;
-      let replyThread: string | undefined;
-      if (channelId.startsWith("D")) {
-        key = `dm:${channelId}`;
-      } else if (threadTs) {
-        key = `thread:${channelId}:${threadTs}`;
-        replyThread = threadTs;
-      } else {
-        await client.chat.postEphemeral({
-          channel: channelId,
-          user: userId,
-          text: "Run `/clear` inside a thread with me, or in our DM.",
-        });
-        return;
+    this.app.action({ action_id: new RegExp(`^${PERMISSION_ACTION_PREFIX}`) }, async ({ ack, body }) => {
+      await ack();
+      const b = body as { actions?: { value?: string }[]; user?: { id?: string } };
+      const value = b.actions?.[0]?.value;
+      if (!value || !this.prompter.resolve(value, b.user?.id)) {
+        this.log.debug("stale or unknown permission action", value);
       }
-      this.log.info(`/clear user=${userId} channel=${channelId} session=${key}`);
-      const status = await this.host.drop(key);
-      this.log.info(`/clear result session=${key} status=${status}`);
-      const text = {
-        cleared: "🧹 Session cleared.",
-        deferred: "🧹 A turn is still running — I'll reset this thread's session as soon as it finishes.",
-        absent: "_No active session here._",
-      }[status];
-      await client.chat.postMessage({ channel: channelId, thread_ts: replyThread, text });
     });
 
     this.app.error(async (err) => {
       this.log.error("bolt error", err);
     });
+  }
+
+  private async runCommand(name: CommandName, args: string, ctx: CommandCtx): Promise<string> {
+    this.log.info(`!${name} ${args} user=${ctx.userId} session=${ctx.key}`);
+    switch (name) {
+      case "help":
+        return HELP_TEXT;
+      case "clear": {
+        const status = await this.host.drop(ctx.key);
+        this.log.info(`clear result session=${ctx.key} status=${status}`);
+        return {
+          cleared: "🧹 Session cleared.",
+          deferred: "🧹 A turn is still running — I'll reset this thread's session as soon as it finishes.",
+          absent: "_No active session here._",
+        }[status];
+      }
+      case "stop": {
+        const did = await this.host.cancel(ctx.key);
+        return did ? "⏹ Stopping…" : "_Nothing is running in this thread._";
+      }
+      case "agent": {
+        const names = this.host.agentNames();
+        if (!args) {
+          const cur = this.host.get(ctx.key)?.agentName ?? this.host.agentNameFor(ctx.key, ctx.channel);
+          return `Agent for this thread: *${cur}*\nAvailable: ${names.map((n) => `\`${n}\``).join(", ")}\nSwitch with \`!agent <name>\` (resets the session).`;
+        }
+        if (!names.includes(args)) return `Unknown agent \`${args}\`. Available: ${names.map((n) => `\`${n}\``).join(", ")}`;
+        const reset = await this.host.setAgent(ctx.key, args);
+        return `🤖 Agent set to *${args}*${reset ? " — previous session dropped; the next message starts fresh." : "."}`;
+      }
+      case "mode": {
+        if (!args) {
+          const s = this.host.get(ctx.key);
+          if (!s?.modes) return `No session yet. Default mode: \`${this.cfg.permissionMode}\`. Set with \`!mode <id>\`.`;
+          return `Mode: *${s.modes.currentModeId}*\nAvailable: ${s.modes.availableModes.map((m) => `\`${m.id}\``).join(", ")}`;
+        }
+        try {
+          const modes = await this.host.setMode(ctx.key, ctx.ref, args);
+          return `🔐 Mode set to *${modes?.currentModeId ?? args}*.`;
+        } catch (e) {
+          return `:warning: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+    }
   }
 
   private async getBotUserId(client: WebClient): Promise<string> {
@@ -123,6 +187,20 @@ export class SlackBridge {
       this.botUserId = auth.user_id as string;
     }
     return this.botUserId;
+  }
+
+  private async userName(client: WebClient, userId: string): Promise<string> {
+    const cached = this.userNames.get(userId);
+    if (cached) return cached;
+    let name = userId;
+    try {
+      const r = await client.users.info({ user: userId });
+      name = r.user?.profile?.display_name || r.user?.real_name || r.user?.name || userId;
+    } catch (e) {
+      this.log.debug(`users.info ${userId} failed`, e);
+    }
+    this.userNames.set(userId, name);
+    return name;
   }
 
   /**
@@ -152,33 +230,58 @@ export class SlackBridge {
     }
   }
 
-  private async handleUserMessage(ev: InboundMessage, client: WebClient): Promise<void> {
+  private async handleUserMessage(ev: InboundMessage, client: WebClient, addressed: boolean): Promise<void> {
     const botId = await this.getBotUserId(client);
     const text = (ev.text ?? "").replaceAll(`<@${botId}>`, "").trim();
-    if (!text) return;
+    const files = ev.files ?? [];
+    if (!text && files.length === 0) return;
 
     const channel = ev.channel;
     const user = ev.user ?? "?";
     const replyThread = threadTsForReply(ev);
     const key = sessionKey(ev);
+    const ref: ThreadRef = { channel, threadTs: replyThread ?? null };
+    const isDm = ev.channel_type === "im";
+
+    const cmd = parseBangCommand(text);
+    if (cmd) {
+      const reply = await this.runCommand(cmd.name, cmd.args, { key, ref, channel, replyThread, userId: user });
+      await client.chat.postMessage({ channel, thread_ts: replyThread, text: reply });
+      return;
+    }
+
     const isNew = !this.host.get(key);
-    this.log.info(`incoming message channel=${channel} user=${user} session=${key} new=${isNew} len=${text.length}`);
+    this.log.info(`incoming message channel=${channel} user=${user} session=${key} new=${isNew} len=${text.length} files=${files.length} addressed=${addressed}`);
     this.log.debug(`incoming text: ${text}`);
 
-    // If a turn on this thread is already running, ours queues behind it
-    // inside session.send(). Reflect that in the placeholder.
+    // Ambient: an un-addressed reply in a shared thread may be ignored by the
+    // agent, so don't post a placeholder — create the message on first text.
+    const ambient = this.cfg.ambient && !isDm && !addressed;
     const existing = this.host.get(key);
-    const queued = !!existing?.busy;
-    const streamer = new SlackStreamer(client, channel, replyThread, this.log, { queued });
+    const streamer = new SlackStreamer(client, channel, replyThread, this.log, { queued: !!existing?.busy, lazy: ambient });
     await streamer.open();
     if (replyThread) this.botThreads.add(`${channel}:${replyThread}`);
 
     try {
-      const session = await this.host.getOrCreate(key, { channel, threadTs: replyThread ?? null });
-      for await (const ev of session.send(text)) {
-        if (ev.kind === "turn_start") await streamer.markActive();
-        else if (ev.kind === "text") await streamer.append(ev.text);
+      const session = await this.host.getOrCreate(key, ref);
+      const prompt = await this.buildPrompt(client, session, ev, text, user, isDm);
+      const abstain = ambient ? new AbstainBuffer(this.cfg.silentSentinel) : undefined;
+      let stop = "end_turn";
+      for await (const e of session.send(prompt)) {
+        if (e.kind === "turn_start") await streamer.markActive();
+        else if (e.kind === "text") await streamer.append(abstain ? abstain.feed(e.text) : e.text);
+        else if (e.kind === "done") stop = e.stopReason;
       }
+      if (abstain) {
+        const { abstained, tail } = abstain.finish();
+        if (abstained) {
+          this.log.info(`session ${key}: agent abstained`);
+          return;
+        }
+        await streamer.append(tail);
+      }
+      if (stop === "cancelled") await streamer.append("\n_(stopped)_");
+      else if (stop !== "end_turn") await streamer.append(`\n_(stopped: ${stop})_`);
       await streamer.flush(true);
     } catch (e) {
       this.log.error(`session error on ${key}`, e);
@@ -187,10 +290,28 @@ export class SlackBridge {
     }
   }
 
+  private async buildPrompt(client: WebClient, session: Session, ev: InboundMessage, text: string, user: string, isDm: boolean): Promise<PromptBlock[]> {
+    let body = text;
+    if (this.cfg.ambient && !isDm) body = `[${await this.userName(client, user)}] ${text}`;
+    const blocks: PromptBlock[] = [];
+    const files = ev.files ?? [];
+    if (files.length) {
+      const { blocks: fileBlocks, notes } = await attachmentsToBlocks(files, {
+        token: this.cfg.slackBotToken,
+        uploadDir: path.join(this.cfg.stateDir, "uploads", ev.channel, ev.ts),
+        allowImages: session.agent.caps.image,
+        log: this.log,
+      });
+      if (notes.length) body = [body, ...notes].filter(Boolean).join("\n");
+      blocks.push(...fileBlocks);
+    }
+    return [{ type: "text", text: body || "(see attached)" }, ...blocks];
+  }
+
   async start(): Promise<void> {
     await this.app.start();
     const id = await this.getBotUserId(this.app.client);
-    this.log.info(`connected; bot user ${id}; waiting for events`);
+    this.log.info(`connected; bot user ${id}; waiting for events` + (this.cfg.ambient ? " (ambient mode)" : ""));
   }
 
   async stop(): Promise<void> {

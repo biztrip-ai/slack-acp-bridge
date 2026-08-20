@@ -22,6 +22,8 @@ export interface ChatClient {
 
 export interface StreamerOptions {
   queued?: boolean;
+  /** Don't post a placeholder; the message is created on the first real text. */
+  lazy?: boolean;
   now?: () => number;
 }
 
@@ -39,6 +41,7 @@ export class SlackStreamer {
   private lastFlushedLen = 0;
   private lastFlushAt = -Infinity;
   private placeholder: string;
+  private readonly lazy: boolean;
   private readonly now: () => number;
 
   constructor(
@@ -49,6 +52,7 @@ export class SlackStreamer {
     opts: StreamerOptions = {},
   ) {
     this.now = opts.now ?? (() => performance.now());
+    this.lazy = opts.lazy ?? false;
     // When another turn on this thread is still running, say so rather than
     // sitting on a frozen "thinking…" line. `markActive` swaps it later.
     this.placeholder = opts.queued
@@ -61,6 +65,7 @@ export class SlackStreamer {
   }
 
   async open(): Promise<void> {
+    if (this.lazy) return;
     const r = await this.client.chat.postMessage({
       channel: this.channel,
       thread_ts: this.threadTs,
@@ -91,7 +96,15 @@ export class SlackStreamer {
   }
 
   async flush(force = false): Promise<void> {
-    if (!this.ts) return;
+    if (!this.ts) {
+      // Lazy mode: create the message with the first real text.
+      if (!this.body.trim()) return;
+      const r = await this.client.chat.postMessage({ channel: this.channel, thread_ts: this.threadTs, text: this.body });
+      this.ts = r.ts;
+      this.lastFlushedLen = this.body.length;
+      this.lastFlushAt = this.now();
+      return;
+    }
     const now = this.now();
     const delta = this.body.length - this.lastFlushedLen;
     if (!force) {
@@ -138,8 +151,12 @@ export class SlackStreamer {
 
   /** Overwrite the current message — used for terminal error reporting. */
   async replaceWith(text: string): Promise<void> {
-    if (!this.ts) return;
     try {
+      if (!this.ts) {
+        const r = await this.client.chat.postMessage({ channel: this.channel, thread_ts: this.threadTs, text });
+        this.ts = r.ts;
+        return;
+      }
       await this.client.chat.update({ channel: this.channel, ts: this.ts, text });
     } catch (e) {
       this.log.warn("chat.update (replaceWith) failed", e);

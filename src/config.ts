@@ -13,6 +13,8 @@ export interface BridgeConfig {
   /** Name of the agent (key in `agents`) used for new sessions. */
   defaultAgent: string;
   agents: Record<string, AgentConfig>;
+  /** Per-channel default agent (channel id → agent name). */
+  channelAgents: Record<string, string>;
 
   /** Working directory every session runs in. */
   cwd: string;
@@ -27,6 +29,16 @@ export interface BridgeConfig {
   };
   /** Appended to the agent's system prompt (Slack mrkdwn guidance). Set "" to disable. */
   systemPromptAppend: string;
+
+  /**
+   * Ambient mode: un-mentioned replies in a thread the bot is part of are
+   * forwarded with the sender's name, and the agent may stay silent by
+   * replying with exactly `silentSentinel`.
+   */
+  ambient: boolean;
+  silentSentinel: string;
+  /** How long a permission prompt waits for a click before cancelling. */
+  permissionTimeoutS: number;
 
   sessionIdleTimeoutS: number; // 0 disables the reaper
   sessionReapIntervalS: number;
@@ -93,6 +105,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     throw new Error(`AGENT=${defaultAgent} is not defined (known: ${Object.keys(agents).join(", ")})`);
   }
 
+  const channelAgents = env.CHANNEL_AGENTS ? (JSON.parse(env.CHANNEL_AGENTS) as Record<string, string>) : {};
+  for (const [ch, a] of Object.entries(channelAgents)) {
+    if (!agents[a]) throw new Error(`CHANNEL_AGENTS: ${ch} → ${a} is not a defined agent`);
+  }
+  const ambient = truthy(env.AMBIENT);
+  const silentSentinel = env.SILENT_SENTINEL ?? "<<SILENT>>";
+  let systemPromptAppend = env.SYSTEM_PROMPT_APPEND ?? SLACK_FORMATTING_PROMPT;
+  if (ambient && systemPromptAppend !== "") systemPromptAppend += "\n\n" + ambientPrompt(silentSentinel);
+
   const idle = floatEnv("SESSION_IDLE_TIMEOUT_S", 14400);
   const stateDir =
     env.STATE_DIR ??
@@ -104,6 +125,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     slackApiUrl: env.SLACK_API_URL || undefined,
     defaultAgent,
     agents,
+    channelAgents,
     cwd: env.AGENT_CWD ?? env.CLAUDE_CWD ?? os.homedir(),
     permissionMode: env.PERMISSION_MODE ?? env.CLAUDE_PERMISSION_MODE ?? "bypassPermissions",
     claude: {
@@ -111,7 +133,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
       settingSources: splitList(env.CLAUDE_SETTING_SOURCES, ["user", "project", "local"]),
       chrome: truthy(env.CLAUDE_CHROME),
     },
-    systemPromptAppend: env.SYSTEM_PROMPT_APPEND ?? SLACK_FORMATTING_PROMPT,
+    systemPromptAppend,
+    ambient,
+    silentSentinel,
+    permissionTimeoutS: floatEnv("PERMISSION_TIMEOUT_S", 600),
     sessionIdleTimeoutS: idle > 0 ? idle : 0,
     sessionReapIntervalS: floatEnv("SESSION_REAP_INTERVAL_S", 300),
     stateDir,
@@ -140,3 +165,12 @@ export const SLACK_FORMATTING_PROMPT = `Your replies are posted directly to Slac
 
 Keep output tight: Slack threads are narrow. Prefer short bulleted lists over
 long paragraphs.`;
+
+export function ambientPrompt(sentinel: string): string {
+  return `You are a participant in a shared Slack thread with several people. Each
+message is prefixed with the sender's name in square brackets. Messages are
+forwarded to you whether or not they are addressed to you. If a message is
+not for you, or you have nothing useful to add, reply with exactly
+${sentinel} and nothing else — the reply will be suppressed. When you are
+addressed directly, always answer.`;
+}
