@@ -3,11 +3,19 @@
   "version": "0.1.0",
   "description": "Slack (Socket Mode) to ACP coding-agent bridge: one Slack thread = one agent session",
   "type": "module",
-  "bin": { "slack-acp-bridge": "dist/index.js" },
+  "bin": {
+    "slack-acp-bridge": "dist/index.js"
+  },
   "main": "dist/lib.js",
   "types": "dist/lib.d.ts",
-  "engines": { "node": ">=22.13" },
-  "files": ["dist/", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -29,5 +37,13 @@
     "tsx": "^4",
     "typescript": "^5.9",
     "vitest": "^3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/biztrip-ai/slack-acp-bridge.git"
+  },
+  "homepage": "https://github.com/biztrip-ai/slack-acp-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/biztrip-ai/slack-acp-bridge/issues"
   }
 }
