@@ -137,7 +137,9 @@ export class SlackBridge {
     });
   }
 
-  private async runCommand(name: CommandName, args: string, ctx: CommandCtx): Promise<string> {
+  private async runCommand(name: CommandName, rawArgs: string, ctx: CommandCtx): Promise<string> {
+    // Only the first token is meaningful for every command that takes one.
+    const args = rawArgs.trim().split(/\s+/)[0] ?? "";
     this.log.info(`!${name} ${args} user=${ctx.userId} session=${ctx.key}`);
     switch (name) {
       case "help":
