@@ -57,7 +57,8 @@
         "im:read",
         "im:write",
         "users:read",
-        "files:read"
+        "files:read",
+        "files:write"
       ]
     }
   },

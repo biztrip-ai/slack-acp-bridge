@@ -19,6 +19,7 @@ export const BOT_SCOPES = [
   "im:write",
   "users:read",
   "files:read",
+  "files:write",
 ] as const;
 
 export const BOT_EVENTS = ["app_mention", "message.channels", "message.groups", "message.im", "message.mpim"] as const;

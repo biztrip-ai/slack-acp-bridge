@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { SessionNotification, StopReason } from "@agentclientprotocol/sdk";
+import type { McpServer, SessionNotification, StopReason } from "@agentclientprotocol/sdk";
 import type { Logger } from "../logger.js";
 import { isDebug, truncate } from "../logger.js";
 import { AgentProcess } from "./agent-process.js";
@@ -27,6 +27,8 @@ export interface HostConfig {
   stateDir: string;
   idleTimeoutS: number; // 0 = no reaper
   reapIntervalS: number;
+  /** MCP servers to hand the agent for a session (e.g. the per-thread Slack tools). */
+  mcpServers?: (key: string, ref: ThreadRef) => McpServer[];
 }
 
 export interface ThreadRef {
@@ -220,6 +222,11 @@ export class AgentHost {
     this.permissionHandler = handler;
   }
 
+  /** Provide MCP servers for new/loaded sessions (overrides `HostConfig.mcpServers`). */
+  setMcpServers(fn: (key: string, ref: ThreadRef) => McpServer[]): void {
+    this.cfg.mcpServers = fn;
+  }
+
   private async routePermission(req: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision> {
     const session = [...this.sessions.values()].find((s) => s.sessionId === req.sessionId);
     if (!session || !this.permissionHandler) return allowAllPolicy(req, signal);
@@ -303,7 +310,7 @@ export class AgentHost {
     await agent.ensureStarted();
 
     const cwd = this.cfg.cwd;
-    const mcpServers: never[] = [];
+    const mcpServers: McpServer[] = this.cfg.mcpServers?.(key, ref) ?? [];
     let sessionId: string | undefined;
     let modes: ModeState | null | undefined;
 

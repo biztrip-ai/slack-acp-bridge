@@ -5,19 +5,36 @@
   },
   "agent": "claude",
   "agents": {
-    "codex": { "command": "codex-acp", "args": [] },
-    "gemini": { "command": "gemini", "args": ["--experimental-acp"] }
+    "codex": {
+      "command": "codex-acp",
+      "args": []
+    },
+    "gemini": {
+      "command": "gemini",
+      "args": [
+        "--experimental-acp"
+      ]
+    }
   },
   "channelAgents": {},
   "cwd": "/path/to/repo",
   "permissionMode": "bypassPermissions",
   "permissionTimeoutS": 600,
   "claude": {
-    "settingSources": ["user", "project", "local"],
+    "settingSources": [
+      "user",
+      "project",
+      "local"
+    ],
     "chrome": false
   },
   "ambient": false,
   "silentSentinel": "<<SILENT>>",
-  "session": { "idleTimeoutS": 14400, "reapIntervalS": 300 },
-  "logLevel": "info"
+  "session": {
+    "idleTimeoutS": 14400,
+    "reapIntervalS": 300
+  },
+  "logLevel": "info",
+  "slackMcp": true,
+  "attachMarker": true
 }

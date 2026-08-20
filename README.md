@@ -36,8 +36,10 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
   `commands` scope.
 - **Multiple agents**: switch per thread with `!agent codex`, or set a per-channel
   default with `CHANNEL_AGENTS`.
-- **Attachments**: images go to the agent inline; other files are saved and
-  passed as `resource_link`s it can read.
+- **Attachments both ways**: files people post go to the agent (images inline,
+  other files as `resource_link`s). The agent sends rich media back with the
+  per-session **Slack MCP server** (`slack_upload_file`, `slack_post_message`) or,
+  for agents without MCP support, by printing `ATTACH: /path/to/file`.
 - **Ambient mode** (`AMBIENT=1`): the bot follows every reply in threads it's part
   of, sees who said what, and can stay silent by answering `<<SILENT>>`.
 - Agent-agnostic core: the Slack layer only sees a normalized event stream.
@@ -52,7 +54,7 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
    paste it. It enables Socket Mode, interactivity (for permission buttons), the
    DM tab, the slash commands, and these bot scopes: `app_mentions:read`, `chat:write`,
    `commands`, `channels:history`, `groups:history`, `im:history`,
-   `mpim:history`, `im:read`, `im:write`, `users:read`, `files:read`.
+   `mpim:history`, `im:read`, `im:write`, `users:read`, `files:read`, `files:write`.
 2. **Basic Information → App-Level Tokens** → create one with
    `connections:write` → `SLACK_APP_TOKEN` (`xapp-…`).
 3. **Install App** → `SLACK_BOT_TOKEN` (`xoxb-…`). Invite the bot to channels.
@@ -106,6 +108,8 @@ except the Slack tokens. See [`config.example.json`](config.example.json).
 | `session.reapIntervalS` | `300` | `SESSION_REAP_INTERVAL_S` | |
 | `stateDir` | `~/.local/state/slack-acp-bridge` | `STATE_DIR` | holds `sessions.db` and uploads |
 | `logLevel` | `info` | `LOG_LEVEL` | `debug` logs full prompts, tool results, thinking |
+| `slackMcp` | `true` | `SLACK_MCP` | give each session the Slack MCP server (`slack_upload_file`, `slack_post_message`) |
+| `attachMarker` | `true` | `ATTACH_MARKER` | upload files named on `ATTACH: <path>` lines of the reply |
 
 Environment variables override file values, which override defaults.
 
@@ -122,6 +126,22 @@ blast radius use `acceptEdits` or `default` (globally, or per thread with
 anyone in the thread can click; unanswered prompts cancel after
 `PERMISSION_TIMEOUT_S`. Requests for threads the bridge can't map (shouldn't
 happen) fall back to auto-allow.
+
+## Rich media from the agent
+
+Two mechanisms, both on by default and both explained to the agent in its
+system prompt:
+
+- **Slack MCP server** (`slackMcp`). Every session is handed a stdio MCP server
+  (via ACP `mcpServers`) exposing `slack_upload_file(path, title?, comment?)`
+  and `slack_post_message(text)`, scoped to that session's thread. The MCP
+  process holds no Slack credentials: it forwards calls over a unix socket
+  (`<stateDir>/bridge.sock`, mode 600) and the bridge performs the API call.
+- **`ATTACH:` marker** (`attachMarker`). A reply line `ATTACH: /abs/or/relative/path`
+  is stripped from the streamed message and the file is uploaded when the turn
+  ends — works with any agent, no tool support needed. (Bizzybot's protocol.)
+
+Uploads need the `files:write` bot scope.
 
 ## Library use
 
@@ -150,6 +170,7 @@ handler they are auto-allowed.
 ```bash
 npm test          # vitest unit tests (streamer, store, turn queue)
 npm run smoke     # spawns the real claude-agent-acp, prompts it, re-attaches via session/load
+npm run smoke:mcp # agent calls slack_post_message through the MCP server → bridge socket
 npm run dev       # tsx src/index.ts
 ```
 
@@ -165,7 +186,6 @@ src/config.ts env → config
 
 - `AskUserQuestion` as a Block Kit form (ACP form elicitation)
 - Tool-call progress in the thread (collapsed), diffs
-- A Slack MCP server so agents can upload files/screenshots into their thread
 - Backfill of messages missed while the bridge was down
 
 ## License

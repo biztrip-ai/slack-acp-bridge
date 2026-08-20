@@ -9,3 +9,5 @@ export { loadConfig, readConfigFile, redactConfig, configTemplate, defaultConfig
 export type { BridgeConfig, ConfigFile } from "./config.js";
 export { createLogger, setLogLevel } from "./logger.js";
 export { buildManifest, BOT_SCOPES, BOT_EVENTS, SLASH_COMMANDS, SETUP_STEPS } from "./manifest.js";
+export { AttachFilter, ATTACH_RE, uploadFiles } from "./slack/attach.js";
+export { BridgeSocketServer, callBridge } from "./mcp/bridge-socket.js";

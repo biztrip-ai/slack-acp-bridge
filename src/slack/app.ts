@@ -1,11 +1,15 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import bolt from "@slack/bolt";
+import type { McpServer } from "@agentclientprotocol/sdk";
 import type { WebClient } from "@slack/web-api";
 import type { BridgeConfig } from "../config.js";
 import type { AgentHost, Session, ThreadRef } from "../host/host.js";
 import type { PromptBlock } from "../host/types.js";
 import type { Logger } from "../logger.js";
+import { BridgeSocketServer, type BridgeRequest } from "../mcp/bridge-socket.js";
 import { AbstainBuffer } from "./abstain.js";
+import { AttachFilter, uploadFiles } from "./attach.js";
 import { HELP_TEXT, parseBangCommand, type CommandName } from "./commands.js";
 import { attachmentsToBlocks, type SlackFile } from "./files.js";
 import { PERMISSION_ACTION_PREFIX, PermissionPrompter } from "./permissions.js";
@@ -50,6 +54,7 @@ export class SlackBridge {
   private readonly app: InstanceType<typeof App>;
   private readonly log: Logger;
   private readonly prompter: PermissionPrompter;
+  private readonly socket?: BridgeSocketServer;
   private botUserId?: string;
   /** Threads we've confirmed the bot has posted in (per process; survives /clear). */
   private readonly botThreads = new Set<string>();
@@ -72,7 +77,54 @@ export class SlackBridge {
     host.onPermission((session, req, signal) =>
       this.prompter.ask(session.ref.channel, session.ref.threadTs ?? undefined, req, signal),
     );
+    if (cfg.slackMcp) {
+      this.socket = new BridgeSocketServer(cfg.stateDir, (req) => this.handleBridgeRequest(req), this.log);
+      host.setMcpServers((key) => this.mcpServersFor(key));
+    }
     this.register();
+  }
+
+  /** The per-session Slack MCP server spec handed to the agent via ACP. */
+  private mcpServersFor(key: string): McpServer[] {
+    if (!this.socket) return [];
+    const serverJs = fileURLToPath(new URL("../mcp/server.js", import.meta.url));
+    return [
+      {
+        name: "slack",
+        command: process.execPath,
+        args: [serverJs],
+        env: [
+          { name: "SLACK_ACP_BRIDGE_SOCK", value: this.socket.socketPath },
+          { name: "SLACK_ACP_BRIDGE_SESSION", value: key },
+        ],
+      },
+    ];
+  }
+
+  /** Requests from per-session MCP servers: act on that session's thread. */
+  private async handleBridgeRequest(req: BridgeRequest): Promise<unknown> {
+    const session = this.host.get(req.session);
+    if (!session) throw new Error(`unknown session ${req.session}`);
+    const { channel, threadTs } = session.ref;
+    switch (req.method) {
+      case "upload_file": {
+        const p = String(req.params.path ?? "");
+        if (!p) throw new Error("path is required");
+        const problems = await uploadFiles(this.app.client, channel, threadTs ?? undefined, [p], this.cfg.cwd, this.log, {
+          title: req.params.title ? String(req.params.title) : undefined,
+          comment: req.params.comment ? String(req.params.comment) : undefined,
+        });
+        return problems.length ? { ok: false, error: problems[0] } : { ok: true };
+      }
+      case "post_message": {
+        const text = String(req.params.text ?? "").trim();
+        if (!text) throw new Error("text is required");
+        const r = await this.app.client.chat.postMessage({ channel, thread_ts: threadTs ?? undefined, text });
+        return { ok: true, ts: r.ts };
+      }
+      default:
+        throw new Error(`unknown method ${String(req.method)}`);
+    }
   }
 
   get client(): WebClient {
@@ -268,12 +320,19 @@ export class SlackBridge {
       const session = await this.host.getOrCreate(key, ref);
       const prompt = await this.buildPrompt(client, session, ev, text, user, isDm);
       const abstain = ambient ? new AbstainBuffer(this.cfg.silentSentinel) : undefined;
+      const attach = this.cfg.attachMarker ? new AttachFilter() : undefined;
+      const pipe = (t: string) => {
+        if (attach) t = attach.feed(t);
+        if (abstain) t = abstain.feed(t);
+        return t;
+      };
       let stop = "end_turn";
       for await (const e of session.send(prompt)) {
         if (e.kind === "turn_start") await streamer.markActive();
-        else if (e.kind === "text") await streamer.append(abstain ? abstain.feed(e.text) : e.text);
+        else if (e.kind === "text") await streamer.append(pipe(e.text));
         else if (e.kind === "done") stop = e.stopReason;
       }
+      if (attach) await streamer.append(abstain ? abstain.feed(attach.finish()) : attach.finish());
       if (abstain) {
         const { abstained, tail } = abstain.finish();
         if (abstained) {
@@ -285,6 +344,12 @@ export class SlackBridge {
       if (stop === "cancelled") await streamer.append("\n_(stopped)_");
       else if (stop !== "end_turn") await streamer.append(`\n_(stopped: ${stop})_`);
       await streamer.flush(true);
+      if (attach?.paths.length) {
+        const problems = await uploadFiles(client, channel, replyThread, attach.paths, this.cfg.cwd, this.log);
+        if (problems.length) {
+          await client.chat.postMessage({ channel, thread_ts: replyThread, text: `:warning: could not attach: ${problems.join("; ")}` });
+        }
+      }
     } catch (e) {
       this.log.error(`session error on ${key}`, e);
       const msg = e instanceof Error ? e.message : String(e);
@@ -311,6 +376,7 @@ export class SlackBridge {
   }
 
   async start(): Promise<void> {
+    await this.socket?.start();
     await this.app.start();
     const id = await this.getBotUserId(this.app.client);
     this.log.info(`connected; bot user ${id}; waiting for events` + (this.cfg.ambient ? " (ambient mode)" : ""));
@@ -318,5 +384,6 @@ export class SlackBridge {
 
   async stop(): Promise<void> {
     await this.app.stop();
+    await this.socket?.stop();
   }
 }

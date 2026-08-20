@@ -48,6 +48,10 @@ export interface ConfigFile {
   session?: { idleTimeoutS?: number; reapIntervalS?: number };
   stateDir?: string;
   logLevel?: "debug" | "info" | "warn" | "error";
+  /** Give each session a Slack MCP server (slack_upload_file, slack_post_message). Default true. */
+  slackMcp?: boolean;
+  /** Honor `ATTACH: <path>` lines in replies by uploading the file. Default true. */
+  attachMarker?: boolean;
 }
 
 const KNOWN_KEYS: Record<string, string[] | null> = {
@@ -65,6 +69,8 @@ const KNOWN_KEYS: Record<string, string[] | null> = {
   session: ["idleTimeoutS", "reapIntervalS"],
   stateDir: null,
   logLevel: null,
+  slackMcp: null,
+  attachMarker: null,
 };
 
 /** Resolved, validated configuration used by the runtime. */
@@ -87,6 +93,8 @@ export interface BridgeConfig {
   sessionReapIntervalS: number;
   stateDir: string;
   logLevel: string;
+  slackMcp: boolean;
+  attachMarker: boolean;
 }
 
 /* --------------------------------------------------------------- helpers */
@@ -195,8 +203,11 @@ export function loadConfig(opts: LoadOptions = {}): BridgeConfig {
 
   const ambient = env.AMBIENT !== undefined ? truthy(env.AMBIENT) : (file.ambient ?? false);
   const silentSentinel = env.SILENT_SENTINEL ?? file.silentSentinel ?? "<<SILENT>>";
+  const slackMcp = env.SLACK_MCP !== undefined ? truthy(env.SLACK_MCP) : (file.slackMcp ?? true);
+  const attachMarker = env.ATTACH_MARKER !== undefined ? truthy(env.ATTACH_MARKER) : (file.attachMarker ?? true);
   const appendRaw = env.SYSTEM_PROMPT_APPEND ?? file.systemPromptAppend;
   let systemPromptAppend = appendRaw === undefined || appendRaw === null ? SLACK_FORMATTING_PROMPT : appendRaw;
+  if (systemPromptAppend !== "" && (slackMcp || attachMarker)) systemPromptAppend += "\n\n" + mediaPrompt(slackMcp, attachMarker);
   if (ambient && systemPromptAppend !== "") systemPromptAppend += "\n\n" + ambientPrompt(silentSentinel);
 
   const idle = num(env.SESSION_IDLE_TIMEOUT_S ?? file.session?.idleTimeoutS, "session.idleTimeoutS", 14400);
@@ -226,6 +237,8 @@ export function loadConfig(opts: LoadOptions = {}): BridgeConfig {
     sessionReapIntervalS: num(env.SESSION_REAP_INTERVAL_S ?? file.session?.reapIntervalS, "session.reapIntervalS", 300),
     stateDir: expandHome(env.STATE_DIR ?? file.stateDir ?? defaultStateDir(env)),
     logLevel,
+    slackMcp,
+    attachMarker,
   };
 }
 
@@ -257,6 +270,8 @@ export function configTemplate(tokens: { botToken?: string; appToken?: string } 
     session: { idleTimeoutS: 14400, reapIntervalS: 300 },
     stateDir: defaultStateDir(),
     logLevel: "info",
+    slackMcp: true,
+    attachMarker: true,
   };
 }
 
@@ -291,4 +306,12 @@ forwarded to you whether or not they are addressed to you. If a message is
 not for you, or you have nothing useful to add, reply with exactly
 ${sentinel} and nothing else — the reply will be suppressed. When you are
 addressed directly, always answer.`;
+}
+
+export function mediaPrompt(mcp: boolean, attach: boolean): string {
+  const ways: string[] = [];
+  if (mcp) ways.push("call the `slack_upload_file` tool with the file path (preferred when the tool is available)");
+  if (attach) ways.push("output a line containing exactly `ATTACH: /absolute/path/to/file` (the line is removed from your reply and the file is uploaded when your turn ends)");
+  return `To share a file, image, screenshot, or other rich media with the user, ${ways.join(", or ")}.
+Never paste base64 or describe an image when you can upload it.`;
 }
