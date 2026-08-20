@@ -1,0 +1,32 @@
+{
+  "name": "slack-acp-bridge",
+  "version": "0.1.0",
+  "description": "Slack (Socket Mode) to ACP coding-agent bridge: one Slack thread = one agent session",
+  "type": "module",
+  "bin": { "slack-acp-bridge": "dist/index.js" },
+  "main": "dist/lib.js",
+  "types": "dist/lib.d.ts",
+  "engines": { "node": ">=22.13" },
+  "files": ["dist/", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "smoke": "tsx scripts/smoke-acp.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.70.0",
+    "@agentclientprotocol/sdk": "^1.3.0",
+    "@slack/bolt": "^4",
+    "dotenv": "^17"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5.9",
+    "vitest": "^3"
+  }
+}

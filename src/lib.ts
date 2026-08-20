@@ -1,0 +1,10 @@
+export { AgentHost, Session } from "./host/host.js";
+export type { HostConfig, ThreadRef, DropResult } from "./host/host.js";
+export { AgentProcess } from "./host/agent-process.js";
+export { SessionStore } from "./host/session-store.js";
+export { allowAllPolicy } from "./host/types.js";
+export type { AgentConfig, TurnEvent, PermissionPolicy, PermissionRequest } from "./host/types.js";
+export { SlackStreamer } from "./slack/streamer.js";
+export { loadConfig, bundledClaudeAgent, SLACK_FORMATTING_PROMPT } from "./config.js";
+export type { BridgeConfig } from "./config.js";
+export { createLogger, setLogLevel } from "./logger.js";

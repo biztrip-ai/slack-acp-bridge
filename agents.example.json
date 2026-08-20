@@ -1,0 +1,4 @@
+{
+  "codex": { "command": "codex-acp", "args": [] },
+  "gemini": { "command": "gemini", "args": ["--experimental-acp"] }
+}
