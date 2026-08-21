@@ -57,6 +57,51 @@ Finish by telling me the config and log paths, how to restart
 /clear, /stop, /agent [name], /mode [id], /help (or !clear, !stop, ... in a message).
 ````
 
+## Setup
+
+### Install & run
+
+Requires Node ≥ 22.13 and a logged-in `claude` CLI on the host (`claude` must
+run from your shell without prompting).
+
+```bash
+npm install -g slack-acp-bridge
+slack-acp-bridge manifest --steps          # create the Slack app from this
+slack-acp-bridge init                      # writes ~/.config/slack-acp-bridge/config.json (mode 600)
+$EDITOR ~/.config/slack-acp-bridge/config.json   # tokens, …
+slack-acp-bridge config                    # resolved configuration, tokens redacted
+cd /path/to/repo && slack-acp-bridge       # sessions work in the directory you start from
+```
+
+Or without installing: `npx slack-acp-bridge …`. From a checkout:
+`npm install && npm run build && npm start`.
+
+On macOS run under `caffeinate -dimsu -- slack-acp-bridge` so App Nap doesn't pause
+the Socket Mode heartbeat.
+
+### Slack app
+
+1. Print the manifest (`npx slack-acp-bridge manifest --name mybot --steps`, or
+   use [`docs/slack-app-manifest.json`](docs/slack-app-manifest.json)), then at
+   <https://api.slack.com/apps> → **Create New App** → **From a manifest** →
+   paste it. It enables Socket Mode, interactivity (for permission buttons), the
+   DM tab, the slash commands, and these bot scopes: `app_mentions:read`, `chat:write`,
+   `commands`, `channels:history`, `groups:history`, `im:history`,
+   `mpim:history`, `im:read`, `im:write`, `users:read`, `files:read`, `files:write`.
+2. **Basic Information → App-Level Tokens** → create one with
+   `connections:write` → `SLACK_APP_TOKEN` (`xapp-…`).
+3. **Install App** → `SLACK_BOT_TOKEN` (`xoxb-…`). Invite the bot to channels.
+
+Changing scopes or events later requires reinstalling the app.
+
+### Configuration
+
+Everything lives in `~/.config/slack-acp-bridge/config.json` (`slack-acp-bridge
+init` creates it; `slack-acp-bridge config` prints the resolved values with
+tokens redacted). Environment variables override file values. All keys, their
+defaults and the permission-mode trade-offs are documented in
+[docs/configuration.md](https://github.com/biztrip-ai/slack-acp-bridge/blob/main/docs/configuration.md).
+
 ## Features
 
 ### Conversations
@@ -132,51 +177,6 @@ posted, no placeholder flickers. `@mention` is a summons, not a gate.
   turn end; `logLevel: debug` adds full prompts, results and thinking.
 - **Usable as a library** — the ACP host (agents, sessions, re-attach, turn
   queue, permission routing) has no Slack dependency; see [Library use](#library-use).
-
-## Setup
-
-### Slack app
-
-1. Print the manifest (`npx slack-acp-bridge manifest --name mybot --steps`, or
-   use [`docs/slack-app-manifest.json`](docs/slack-app-manifest.json)), then at
-   <https://api.slack.com/apps> → **Create New App** → **From a manifest** →
-   paste it. It enables Socket Mode, interactivity (for permission buttons), the
-   DM tab, the slash commands, and these bot scopes: `app_mentions:read`, `chat:write`,
-   `commands`, `channels:history`, `groups:history`, `im:history`,
-   `mpim:history`, `im:read`, `im:write`, `users:read`, `files:read`, `files:write`.
-2. **Basic Information → App-Level Tokens** → create one with
-   `connections:write` → `SLACK_APP_TOKEN` (`xapp-…`).
-3. **Install App** → `SLACK_BOT_TOKEN` (`xoxb-…`). Invite the bot to channels.
-
-Changing scopes or events later requires reinstalling the app.
-
-### Install & run
-
-Requires Node ≥ 22.13 and a logged-in `claude` CLI on the host (`claude` must
-run from your shell without prompting).
-
-```bash
-npm install -g slack-acp-bridge
-slack-acp-bridge manifest --steps          # create the Slack app from this
-slack-acp-bridge init                      # writes ~/.config/slack-acp-bridge/config.json (mode 600)
-$EDITOR ~/.config/slack-acp-bridge/config.json   # tokens, …
-slack-acp-bridge config                    # resolved configuration, tokens redacted
-cd /path/to/repo && slack-acp-bridge       # sessions work in the directory you start from
-```
-
-Or without installing: `npx slack-acp-bridge …`. From a checkout:
-`npm install && npm run build && npm start`.
-
-On macOS run under `caffeinate -dimsu -- slack-acp-bridge` so App Nap doesn't pause
-the Socket Mode heartbeat.
-
-### Configuration
-
-Everything lives in `~/.config/slack-acp-bridge/config.json` (`slack-acp-bridge
-init` creates it; `slack-acp-bridge config` prints the resolved values with
-tokens redacted). Environment variables override file values. All keys, their
-defaults and the permission-mode trade-offs are documented in
-[docs/configuration.md](https://github.com/biztrip-ai/slack-acp-bridge/blob/main/docs/configuration.md).
 
 ## Rich media from the agent
 
