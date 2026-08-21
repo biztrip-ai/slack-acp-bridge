@@ -57,7 +57,9 @@ describe("SlackStreamer", () => {
     expect(slack.posts).toHaveLength(2); // placeholder + rollover
     expect(s.messageTs).toBe("ts2");
     await s.flush(true);
-    expect(slack.updates.at(-1)!).toEqual({ ts: "ts2", text: "b".repeat(50) });
+    // The first message is filled to capacity, the remainder continues in the next one.
+    expect(slack.updates.find((u) => u.ts === "ts1" && u.text.endsWith("b".repeat(10)))).toBeTruthy();
+    expect(slack.updates.at(-1)!).toEqual({ ts: "ts2", text: "b".repeat(40) });
   });
 
   it("recovers from msg_too_long by trimming and rolling over", async () => {

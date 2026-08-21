@@ -6,10 +6,9 @@ in that thread continues the same agent session. Runs over Slack **Socket Mode**
 (no public URL) on a machine you control, so the agent has your full dev
 environment: repos, CLIs, MCP servers, browser automation.
 
-Ships with Claude Code (via
-[`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp))
-built in; any other ACP agent (`codex-acp`, Gemini CLI, OpenCode, …) is one line
-of JSON away.
+The bridge works with any [ACP](https://agentclientprotocol.com)-compatible
+coding agent — Claude Code, Codex, Gemini CLI, OpenCode and others — configured
+with a single entry naming the agent's command.
 
 ```
 Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claude-agent-acp ──▶ claude
