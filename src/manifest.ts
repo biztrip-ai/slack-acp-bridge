@@ -41,7 +41,7 @@ export function buildManifest(opts: ManifestOptions = {}): Record<string, unknow
       background_color: "#1f2937",
     },
     features: {
-      bot_user: { display_name: name, always_online: false },
+      bot_user: { display_name: name, always_online: true },
       app_home: { home_tab_enabled: false, messages_tab_enabled: true, messages_tab_read_only_enabled: false },
       slash_commands: SLASH_COMMANDS.map((c) => ({ ...c, should_escape: false })),
     },

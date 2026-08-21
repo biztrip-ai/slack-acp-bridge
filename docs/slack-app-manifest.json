@@ -7,7 +7,7 @@
   "features": {
     "bot_user": {
       "display_name": "slack-acp-bridge",
-      "always_online": false
+      "always_online": true
     },
     "app_home": {
       "home_tab_enabled": false,
