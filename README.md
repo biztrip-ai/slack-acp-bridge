@@ -16,6 +16,46 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
                               └── sqlite: thread → session                ──▶ claude
 ```
 
+## Agent instructions
+
+Setting this up is a good job for a coding agent running on the machine that will
+host the bridge. Paste the block below into it; the only steps a human must do by
+hand involve Slack tokens.
+
+````text
+Set up slack-acp-bridge on this machine (a Slack bot that relays Slack threads to
+a local coding agent over ACP). Verify each step before moving on.
+
+1. Install: Node >= 22.13, then `npm install -g slack-acp-bridge`. The agent the
+   bridge will run must already work non-interactively on this machine (Claude
+   Code by default: `claude -p "say ok"`); if it doesn't, ask me to log in first.
+
+2. Slack app: run `slack-acp-bridge manifest --name <bot name> --steps` (ask me for
+   the name). The steps are: api.slack.com/apps -> Create New App -> From a
+   manifest -> paste the JSON -> Create; Basic Information -> App-Level Tokens ->
+   generate one with scope connections:write (xapp-...); Install App -> Install to
+   Workspace (xoxb-...). If you have browser control, offer to drive these steps
+   yourself in my logged-in browser; otherwise give me the JSON and the steps.
+   Either way, leave copying the tokens to me.
+
+3. Config: run `slack-acp-bridge init`, then ask me to put the two tokens into
+   ~/.config/slack-acp-bridge/config.json myself (slack.botToken, slack.appToken).
+   Never take tokens through the chat or a command line. Set cwd to the directory
+   the agent should work in (ask me). Check with `slack-acp-bridge config`:
+   tokens must not show "(unset)".
+
+4. Run: `slack-acp-bridge > ~/slack-acp-bridge.log 2>&1 &` (on macOS wrap it in
+   `caffeinate -dimsu --`). Wait for "connected; bot user U..." in the log.
+   invalid_auth = wrong token; missing_scope = reinstall the app.
+
+5. Verify: ask me to `/invite` the bot to a channel and mention it. Confirm the
+   log shows a session created and `stop=end_turn`, and the reply is in Slack.
+
+Finish by telling me the config and log paths, how to restart
+(`pkill -f slack-acp-bridge`, then the run command), and the thread commands:
+/clear, /stop, /agent [name], /mode [id], /help (or !clear, !stop, ... in a message).
+````
+
 ## Features
 
 ### Conversations
@@ -131,89 +171,11 @@ the Socket Mode heartbeat.
 
 ### Configuration
 
-Configuration lives in **`~/.config/slack-acp-bridge/config.json`**
-(`$XDG_CONFIG_HOME` respected; override with `--config <path>` or
-`$SLACK_ACP_BRIDGE_CONFIG`). Unknown keys are rejected. Every key is optional
-except the Slack tokens. See [`config.example.json`](config.example.json).
-
-| Key | Default | Env override | Notes |
-| --- | --- | --- | --- |
-| `slack.botToken`, `slack.appToken` | — | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | required |
-| `slack.apiUrl` | real Slack | `SLACK_API_URL` | Slack-compatible server (e.g. Flow) |
-| `agent` | `claude` | `AGENT` | agent used for new sessions |
-| `agents` | `{}` | — | extra agents: `{ name: { command, args, env, permissionMode } }`; `claude` is built in |
-| `channelAgents` | `{}` | `CHANNEL_AGENTS` (JSON) | channel id → agent name |
-| `cwd` | `$HOME` | `AGENT_CWD` | working directory for every session |
-| `permissionMode` | `bypassPermissions` | `PERMISSION_MODE` | default ACP session mode; per agent via `agents.<name>.permissionMode`, per thread with `!mode`. Modes the agent doesn't offer are ignored with a warning |
-| `permissionTimeoutS` | `600` | `PERMISSION_TIMEOUT_S` | unanswered prompts are cancelled after this |
-| `claude.model` | agent default | `CLAUDE_MODEL` | Claude only |
-| `claude.settingSources` | `["user","project","local"]` | `CLAUDE_SETTING_SOURCES` | which `~/.claude` / project config layers Claude loads |
-| `claude.chrome` | `false` | `CLAUDE_CHROME` | spawn Claude with `--chrome` |
-| `systemPromptAppend` | Slack-mrkdwn guidance | `SYSTEM_PROMPT_APPEND` | `""` disables |
-| `ambient` | `false` | `AMBIENT` | follow un-addressed thread replies; agent may abstain |
-| `silentSentinel` | `<<SILENT>>` | `SILENT_SENTINEL` | |
-| `session.idleTimeoutS` | `14400` | `SESSION_IDLE_TIMEOUT_S` | `0` disables the reaper |
-| `session.reapIntervalS` | `300` | `SESSION_REAP_INTERVAL_S` | |
-| `stateDir` | `~/.local/state/slack-acp-bridge` | `STATE_DIR` | holds `sessions.db` and uploads |
-| `logLevel` | `info` | `LOG_LEVEL` | `debug` logs full prompts, tool results, thinking |
-| `slackMcp` | `true` | `SLACK_MCP` | give each session the Slack MCP server (`slack_upload_file`, `slack_post_message`) |
-| `attachMarker` | `true` | `ATTACH_MARKER` | upload files named on `ATTACH: <path>` lines of the reply |
-
-Environment variables override file values, which override defaults.
-
-Runtime state (not configuration) lives in `stateDir`: `sessions.db` (thread →
-session map and per-thread `!agent`/`!mode` preferences) and `uploads/`.
-
-### About `PERMISSION_MODE`
-
-The default, `bypassPermissions`, lets the agent run any tool with no human in
-the loop — treat the bot as a remote-code-execution surface scoped to the
-account it runs under, and lock down `AGENT_CWD` accordingly. For a tighter
-blast radius use `acceptEdits` or `default` (globally, or per thread with
-`!mode`): the agent's permission requests are posted in the thread as buttons;
-anyone in the thread can click; unanswered prompts cancel after
-`PERMISSION_TIMEOUT_S`. Requests for threads the bridge can't map (shouldn't
-happen) fall back to auto-allow.
-
-## Agent instructions
-
-Setting this up is a good job for a coding agent running on the machine that will
-host the bridge. Paste the block below into it; the only steps a human must do by
-hand involve Slack tokens.
-
-````text
-Set up slack-acp-bridge on this machine (a Slack bot that relays Slack threads to
-a local coding agent over ACP). Verify each step before moving on.
-
-1. Install: Node >= 22.13, then `npm install -g slack-acp-bridge`. The agent the
-   bridge will run must already work non-interactively on this machine (Claude
-   Code by default: `claude -p "say ok"`); if it doesn't, ask me to log in first.
-
-2. Slack app: run `slack-acp-bridge manifest --name <bot name> --steps` (ask me for
-   the name). The steps are: api.slack.com/apps -> Create New App -> From a
-   manifest -> paste the JSON -> Create; Basic Information -> App-Level Tokens ->
-   generate one with scope connections:write (xapp-...); Install App -> Install to
-   Workspace (xoxb-...). If you have browser control, offer to drive these steps
-   yourself in my logged-in browser; otherwise give me the JSON and the steps.
-   Either way, leave copying the tokens to me.
-
-3. Config: run `slack-acp-bridge init`, then ask me to put the two tokens into
-   ~/.config/slack-acp-bridge/config.json myself (slack.botToken, slack.appToken).
-   Never take tokens through the chat or a command line. Set cwd to the directory
-   the agent should work in (ask me). Check with `slack-acp-bridge config`:
-   tokens must not show "(unset)".
-
-4. Run: `slack-acp-bridge > ~/slack-acp-bridge.log 2>&1 &` (on macOS wrap it in
-   `caffeinate -dimsu --`). Wait for "connected; bot user U..." in the log.
-   invalid_auth = wrong token; missing_scope = reinstall the app.
-
-5. Verify: ask me to `/invite` the bot to a channel and mention it. Confirm the
-   log shows a session created and `stop=end_turn`, and the reply is in Slack.
-
-Finish by telling me the config and log paths, how to restart
-(`pkill -f slack-acp-bridge`, then the run command), and the thread commands:
-/clear, /stop, /agent [name], /mode [id], /help (or !clear, !stop, ... in a message).
-````
+Everything lives in `~/.config/slack-acp-bridge/config.json` (`slack-acp-bridge
+init` creates it; `slack-acp-bridge config` prints the resolved values with
+tokens redacted). Environment variables override file values. All keys, their
+defaults and the permission-mode trade-offs are documented in
+[docs/configuration.md](https://github.com/biztrip-ai/slack-acp-bridge/blob/main/docs/configuration.md).
 
 ## Rich media from the agent
 

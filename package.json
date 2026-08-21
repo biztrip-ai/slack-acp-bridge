@@ -43,6 +43,7 @@
     "!dist/**/*.map",
     "config.example.json",
     "docs/slack-app-manifest.json",
+    "docs/configuration.md",
     "README.md",
     "LICENSE"
   ],
