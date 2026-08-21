@@ -19,30 +19,89 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
 
 ## Features
 
-- One persistent agent session per Slack thread (or per DM). Multiple people and
-  threads at once.
-- Streaming replies: a single message edited in place (1 update/s), rolling over
-  to a new message near Slack's length limit.
-- Turns on the same thread are **queued**, not cancelled — a "thanks" mid-task
-  won't kill a PR review. A queued message shows a "⏳ queued" placeholder.
-- **Survives restarts.** The thread→session map is in SQLite; the next reply in
-  an old thread re-attaches with `session/load`, history intact.
-- Idle sessions are reaped (default 4h) to free memory; they re-load on demand.
-- **Permission prompts in Slack.** Run a thread in `acceptEdits`/`default`/`plan`
-  mode and tool approvals show up as buttons in the thread (one click, with a
-  timeout). `bypassPermissions` skips them.
-- **Commands**: `/clear`, `/stop`, `/agent [name]`, `/mode [id]`, `/help` — also
-  accepted as `!clear`, `!stop`, … in a message, so they work even without the
-  `commands` scope.
-- **Multiple agents**: switch per thread with `!agent codex`, or set a per-channel
-  default with `CHANNEL_AGENTS`.
-- **Attachments both ways**: files people post go to the agent (images inline,
-  other files as `resource_link`s). The agent sends rich media back with the
-  per-session **Slack MCP server** (`slack_upload_file`, `slack_post_message`) or,
-  for agents without MCP support, by printing `ATTACH: /path/to/file`.
-- **Ambient mode** (`AMBIENT=1`): the bot follows every reply in threads it's part
-  of, sees who said what, and can stay silent by answering `<<SILENT>>`.
-- Agent-agnostic core: the Slack layer only sees a normalized event stream.
+### Conversations
+
+- **One thread, one agent session.** An `@mention` starts a thread and an ACP
+  session; every reply in that thread — from anyone, with or without re-mentioning
+  the bot — continues it. DMs get a session per conversation. Any number of
+  threads and people run at once, each with an isolated agent session.
+- **Queued, never cancelled.** A second message while the agent is working is
+  queued (with a "⏳ queued" placeholder) and runs next. Nobody's "thanks!" kills
+  a PR review halfway through. `/stop` cancels explicitly, dropping the queue.
+- **Survives restarts and idle eviction.** The thread→session map lives in
+  SQLite; when the bridge restarts or an idle session is reaped (default 4h, to
+  free the agent subprocess), the next reply re-attaches via ACP `session/load`
+  with the full conversation history intact.
+
+### Streaming and Slack UX
+
+- **Live streaming** into a single message edited in place, throttled to Slack's
+  ~1 update/s limit, with a random "thinking…" placeholder while the agent starts.
+- **Long replies roll over** into follow-up messages well before Slack's real
+  `msg_too_long` threshold (not just the documented one), and recover if Slack
+  rejects an update anyway.
+- **Slack mrkdwn out of the box.** The agent's system prompt is extended with
+  Slack's formatting dialect (no `**bold**`, no tables, `<url|label>` links), so
+  replies render cleanly.
+
+### Safety and permissions
+
+- **Permission prompts as Slack buttons.** Run a thread in `default`,
+  `acceptEdits` or `plan` mode and each tool approval the agent asks for is
+  posted in the thread with one button per option. Anyone in the thread can
+  click; unanswered prompts time out (default 10 min); `/stop` cancels them.
+  `bypassPermissions` (the default) skips prompts entirely for trusted setups.
+- **Per-thread modes**, persisted: `/mode acceptEdits` in one thread doesn't
+  affect others, and survives restarts and agent switches.
+- **Credentials stay in the bridge.** The agent never receives the Slack tokens:
+  uploads and messages it requests go through a unix socket to the bridge.
+
+### Commands
+
+`/clear` (reset the thread's session), `/stop` (cancel the running turn),
+`/agent [name]`, `/mode [id]`, `/help`. Every command is also accepted as
+`!clear`, `!stop`, … inside a message, so they work without the `commands`
+scope and in Slack-compatible servers that lack slash commands.
+
+### Multiple agents
+
+- **Any ACP agent.** Claude Code is bundled (via `claude-agent-acp`); add Codex,
+  Gemini CLI, OpenCode or any other [ACP](https://agentclientprotocol.com) agent
+  with one config entry. Agent-specific extras (Claude's model, setting sources,
+  `--chrome`) are passed through when the agent is Claude and ignored otherwise.
+- **Per-thread and per-channel selection.** `/agent codex` switches a thread
+  (starting a fresh session); `channelAgents` sets a default per channel.
+
+### Rich media, both directions
+
+- **Inbound:** files posted in a thread or DM reach the agent — images as inline
+  image content, everything else saved to disk and passed as a `resource_link`
+  the agent can read.
+- **Outbound:** each session gets a **Slack MCP server** with
+  `slack_upload_file` and `slack_post_message`, scoped to its own thread, so the
+  agent can drop screenshots, PDFs or logs into the conversation and post
+  progress notes mid-task. Agents without MCP support can print
+  `ATTACH: /path/to/file` instead; the line is stripped from the reply and the
+  file uploaded when the turn ends.
+
+### Ambient mode
+
+With `ambient: true` the bot behaves like a teammate who is *in* the thread: every
+reply is forwarded with the sender's name, the agent decides whether it has
+something to add, and it stays silent by answering `<<SILENT>>` — nothing is
+posted, no placeholder flickers. `@mention` is a summons, not a gate.
+
+### Operations
+
+- **Socket Mode** — no public URL, runs on a laptop or a box behind a firewall.
+- **One JSON config file** (`~/.config/slack-acp-bridge/config.json`) with
+  environment-variable overrides, strict key validation, and `init` / `config`
+  subcommands; `manifest` prints the Slack app manifest so app setup is a paste.
+- **Slack-compatible servers**: point `slack.apiUrl` at a Flow-style server.
+- **Observable**: one log line per incoming message, tool call, tool result and
+  turn end; `logLevel: debug` adds full prompts, results and thinking.
+- **Usable as a library** — the ACP host (agents, sessions, re-attach, turn
+  queue, permission routing) has no Slack dependency; see [Library use](#library-use).
 
 ## Setup
 
