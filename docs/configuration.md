@@ -40,7 +40,7 @@ session map and per-thread `!agent`/`!mode` preferences) and `uploads/`.
 
 The default, `bypassPermissions`, lets the agent run any tool with no human in
 the loop — treat the bot as a remote-code-execution surface scoped to the
-account it runs under, and lock down `AGENT_CWD` accordingly. For a tighter
+account it runs under, and start it from a directory you are comfortable giving it. For a tighter
 blast radius use `acceptEdits` or `default` (globally, or per thread with
 `!mode`): the agent's permission requests are posted in the thread as buttons;
 anyone in the thread can click; unanswered prompts cancel after
