@@ -43,6 +43,10 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
 - **Slack mrkdwn out of the box.** The agent's system prompt is extended with
   Slack's formatting dialect (no `**bold**`, no tables, `<url|label>` links), so
   replies render cleanly.
+- **Media in and out.** Files posted in Slack reach the agent (images inline,
+  other files as readable `resource_link`s), and the agent can send screenshots,
+  PDFs, logs and progress notes back into the thread via its per-session Slack
+  MCP tools or an `ATTACH: /path` line in its reply.
 
 ### Safety and permissions
 
@@ -69,21 +73,6 @@ scope and in Slack-compatible servers that lack slash commands.
   `--chrome`) are passed through when the agent is Claude and ignored otherwise.
 - **Per-thread and per-channel selection.** `/agent codex` switches a thread
   (starting a fresh session); `channelAgents` sets a default per channel.
-
-### Media inputs and outputs
-
-Slack conversations aren't text-only, and neither is the bridge.
-
-- **Media in.** Images, screenshots, PDFs, logs and any other files posted in a
-  thread or DM are passed to the agent with the message: images as inline image
-  content it can look at directly, everything else saved to disk and handed
-  over as a `resource_link` it can open and read.
-- **Media out.** Every session gets its own **Slack MCP server** with
-  `slack_upload_file` and `slack_post_message`, scoped to that thread, so the
-  agent can drop a screenshot, a generated PDF, a diff or a log file straight
-  into the conversation and post progress notes mid-task. Agents without MCP
-  support print `ATTACH: /path/to/file` instead; the line is stripped from the
-  reply and the file is uploaded when the turn ends.
 
 ### Ambient mode
 
