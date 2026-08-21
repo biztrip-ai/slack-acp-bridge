@@ -21,7 +21,6 @@
     }
   },
   "channelAgents": {},
-  "cwd": "/path/to/repo",
   "permissionMode": "bypassPermissions",
   "permissionTimeoutS": 600,
   "claude": {

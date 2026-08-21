@@ -33,8 +33,6 @@ export interface ConfigFile {
   agents?: Record<string, { command: string; args?: string[]; env?: Record<string, string>; permissionMode?: string }>;
   /** Per-channel default agent: channel id → agent name. */
   channelAgents?: Record<string, string>;
-  /** Working directory every session runs in. */
-  cwd?: string;
   /** Default ACP session mode (claude: default | acceptEdits | plan | bypassPermissions | auto). */
   permissionMode?: string;
   /** Unanswered permission prompts are cancelled after this many seconds. */
@@ -59,7 +57,6 @@ const KNOWN_KEYS: Record<string, string[] | null> = {
   agent: null,
   agents: null,
   channelAgents: null,
-  cwd: null,
   permissionMode: null,
   permissionTimeoutS: null,
   claude: ["model", "settingSources", "chrome"],
@@ -82,6 +79,7 @@ export interface BridgeConfig {
   defaultAgent: string;
   agents: Record<string, AgentConfig>;
   channelAgents: Record<string, string>;
+  /** Working directory every session runs in: the directory the bridge was started from. */
   cwd: string;
   permissionMode: string;
   permissionTimeoutS: number;
@@ -222,7 +220,7 @@ export function loadConfig(opts: LoadOptions = {}): BridgeConfig {
     defaultAgent,
     agents,
     channelAgents,
-    cwd: expandHome(env.AGENT_CWD ?? env.CLAUDE_CWD ?? file.cwd ?? os.homedir()),
+    cwd: process.cwd(),
     permissionMode: env.PERMISSION_MODE ?? env.CLAUDE_PERMISSION_MODE ?? file.permissionMode ?? "bypassPermissions",
     permissionTimeoutS: num(env.PERMISSION_TIMEOUT_S ?? file.permissionTimeoutS, "permissionTimeoutS", 600),
     claude: {
@@ -263,7 +261,6 @@ export function configTemplate(tokens: { botToken?: string; appToken?: string } 
     agent: "claude",
     agents: {},
     channelAgents: {},
-    cwd: os.homedir(),
     permissionMode: "bypassPermissions",
     permissionTimeoutS: 600,
     claude: { settingSources: ["user", "project", "local"], chrome: false },

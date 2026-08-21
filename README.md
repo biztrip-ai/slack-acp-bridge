@@ -40,12 +40,13 @@ a local coding agent over ACP). Verify each step before moving on.
 
 3. Config: run `slack-acp-bridge init`, then ask me to put the two tokens into
    ~/.config/slack-acp-bridge/config.json myself (slack.botToken, slack.appToken).
-   Never take tokens through the chat or a command line. Set cwd to the directory
-   the agent should work in (ask me). Check with `slack-acp-bridge config`:
-   tokens must not show "(unset)".
+   Never take tokens through the chat or a command line. Check with
+   `slack-acp-bridge config`: tokens must not show "(unset)".
 
-4. Run: `slack-acp-bridge > ~/slack-acp-bridge.log 2>&1 &` (on macOS wrap it in
-   `caffeinate -dimsu --`). Wait for "connected; bot user U..." in the log.
+4. Run from the directory the agent should work in (ask me; a repo checkout is
+   typical): `cd <dir> && slack-acp-bridge > ~/slack-acp-bridge.log 2>&1 &` (on
+   macOS wrap it in `caffeinate -dimsu --`). Wait for "connected; bot user U..."
+   in the log.
    invalid_auth = wrong token; missing_scope = reinstall the app.
 
 5. Verify: ask me to `/invite` the bot to a channel and mention it. Confirm the
@@ -158,9 +159,9 @@ run from your shell without prompting).
 npm install -g slack-acp-bridge
 slack-acp-bridge manifest --steps          # create the Slack app from this
 slack-acp-bridge init                      # writes ~/.config/slack-acp-bridge/config.json (mode 600)
-$EDITOR ~/.config/slack-acp-bridge/config.json   # tokens, cwd, …
+$EDITOR ~/.config/slack-acp-bridge/config.json   # tokens, …
 slack-acp-bridge config                    # resolved configuration, tokens redacted
-slack-acp-bridge                           # run (process title "slack-acp-bridge")
+cd /path/to/repo && slack-acp-bridge       # sessions work in the directory you start from
 ```
 
 Or without installing: `npx slack-acp-bridge …`. From a checkout:

@@ -14,9 +14,9 @@ const base = { slack: { botToken: "xoxb-file", appToken: "xapp-file" } };
 
 describe("config.json loading", () => {
   it("reads the file and applies defaults", () => {
-    const c = loadConfig({ configPath: write("a.json", { ...base, cwd: "~/repo", agent: "claude" }), env: {} });
+    const c = loadConfig({ configPath: write("a.json", { ...base, agent: "claude" }), env: {} });
     expect(c.slackBotToken).toBe("xoxb-file");
-    expect(c.cwd).toBe(path.join(os.homedir(), "repo"));
+    expect(c.cwd).toBe(process.cwd());
     expect(c.permissionMode).toBe("bypassPermissions");
     expect(c.sessionIdleTimeoutS).toBe(14400);
     expect(c.configPath).toContain("a.json");

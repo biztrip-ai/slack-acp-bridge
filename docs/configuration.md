@@ -12,7 +12,6 @@ except the Slack tokens. See [`config.example.json`](../config.example.json).
 | `agent` | `claude` | `AGENT` | agent used for new sessions |
 | `agents` | `{}` | — | extra agents: `{ name: { command, args, env, permissionMode } }`; `claude` is built in |
 | `channelAgents` | `{}` | `CHANNEL_AGENTS` (JSON) | channel id → agent name |
-| `cwd` | `$HOME` | `AGENT_CWD` | working directory for every session |
 | `permissionMode` | `bypassPermissions` | `PERMISSION_MODE` | default ACP session mode; per agent via `agents.<name>.permissionMode`, per thread with `!mode`. Modes the agent doesn't offer are ignored with a warning |
 | `permissionTimeoutS` | `600` | `PERMISSION_TIMEOUT_S` | unanswered prompts are cancelled after this |
 | `claude.model` | agent default | `CLAUDE_MODEL` | Claude only |
@@ -29,6 +28,10 @@ except the Slack tokens. See [`config.example.json`](../config.example.json).
 | `attachMarker` | `true` | `ATTACH_MARKER` | upload files named on `ATTACH: <path>` lines of the reply |
 
 Environment variables override file values, which override defaults.
+
+The agent's **working directory is the directory the bridge is started from** —
+`cd` into the repo (or wherever the agent should work) before running
+`slack-acp-bridge`. It is not a config key.
 
 Runtime state (not configuration) lives in `stateDir`: `sessions.db` (thread →
 session map and per-thread `!agent`/`!mode` preferences) and `uploads/`.
