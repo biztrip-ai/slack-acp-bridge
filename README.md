@@ -26,9 +26,10 @@ hand involve Slack tokens.
 Set up slack-acp-bridge on this machine (a Slack bot that relays Slack threads to
 a local coding agent over ACP). Verify each step before moving on.
 
-1. Install: Node >= 22.13, then `npm install -g slack-acp-bridge`. The agent the
-   bridge will run must already work non-interactively on this machine (Claude
-   Code by default: `claude -p "say ok"`); if it doesn't, ask me to log in first.
+1. Install: Node >= 22.13, then `npm install -g slack-acp-bridge`. The coding
+   agent the bridge will run (Claude Code by default) must be installed and
+   logged in on this machine; don't try to test it yourself — an auth problem
+   shows up in the bridge log on the first message, and I'll fix it then.
 
 2. Slack app: run `slack-acp-bridge manifest --name <bot name> --steps` (ask me for
    the name). The steps are: api.slack.com/apps -> Create New App -> From a
