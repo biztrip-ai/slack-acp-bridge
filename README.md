@@ -191,10 +191,12 @@ a local coding agent over ACP). Verify each step before moving on.
    Code by default: `claude -p "say ok"`); if it doesn't, ask me to log in first.
 
 2. Slack app: run `slack-acp-bridge manifest --name <bot name> --steps` (ask me for
-   the name) and give me the JSON plus these steps: api.slack.com/apps -> Create
-   New App -> From a manifest -> paste -> Create; Basic Information -> App-Level
-   Tokens -> generate one with scope connections:write (xapp-...); Install App ->
-   Install to Workspace (xoxb-...).
+   the name). The steps are: api.slack.com/apps -> Create New App -> From a
+   manifest -> paste the JSON -> Create; Basic Information -> App-Level Tokens ->
+   generate one with scope connections:write (xapp-...); Install App -> Install to
+   Workspace (xoxb-...). If you have browser control, offer to drive these steps
+   yourself in my logged-in browser; otherwise give me the JSON and the steps.
+   Either way, leave copying the tokens to me.
 
 3. Config: run `slack-acp-bridge init`, then ask me to put the two tokens into
    ~/.config/slack-acp-bridge/config.json myself (slack.botToken, slack.appToken).
