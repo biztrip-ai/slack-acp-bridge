@@ -340,7 +340,13 @@ export class AgentHost {
 
     const s = new Session(key, agentName, agent, sessionId, ref, slog);
     s.modes = modes ?? undefined;
-    await this.applyMode(s, prefs.mode ?? this.cfg.permissionMode);
+    // A default mode the agent doesn't offer (e.g. Claude's bypassPermissions on
+    // Codex) is not fatal: keep the agent's own default and say so.
+    try {
+      await this.applyMode(s, prefs.mode ?? this.cfg.agents[agentName]?.permissionMode ?? this.cfg.permissionMode);
+    } catch (e) {
+      slog.warn(e instanceof Error ? e.message : String(e));
+    }
 
     const now = Date.now();
     this.store.put({

@@ -6,6 +6,8 @@ export interface AgentConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /** Default session mode for this agent (overrides the global permissionMode; e.g. "full-access" for codex-acp). */
+  permissionMode?: string;
 }
 
 export type PromptBlock = ContentBlock;

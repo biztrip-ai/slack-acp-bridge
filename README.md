@@ -152,10 +152,10 @@ except the Slack tokens. See [`config.example.json`](config.example.json).
 | `slack.botToken`, `slack.appToken` | — | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | required |
 | `slack.apiUrl` | real Slack | `SLACK_API_URL` | Slack-compatible server (e.g. Flow) |
 | `agent` | `claude` | `AGENT` | agent used for new sessions |
-| `agents` | `{}` | — | extra agents: `{ name: { command, args, env } }`; `claude` is built in |
+| `agents` | `{}` | — | extra agents: `{ name: { command, args, env, permissionMode } }`; `claude` is built in |
 | `channelAgents` | `{}` | `CHANNEL_AGENTS` (JSON) | channel id → agent name |
 | `cwd` | `$HOME` | `AGENT_CWD` | working directory for every session |
-| `permissionMode` | `bypassPermissions` | `PERMISSION_MODE` | default ACP session mode; per thread with `!mode` |
+| `permissionMode` | `bypassPermissions` | `PERMISSION_MODE` | default ACP session mode; per agent via `agents.<name>.permissionMode`, per thread with `!mode`. Modes the agent doesn't offer are ignored with a warning |
 | `permissionTimeoutS` | `600` | `PERMISSION_TIMEOUT_S` | unanswered prompts are cancelled after this |
 | `claude.model` | agent default | `CLAUDE_MODEL` | Claude only |
 | `claude.settingSources` | `["user","project","local"]` | `CLAUDE_SETTING_SOURCES` | which `~/.claude` / project config layers Claude loads |

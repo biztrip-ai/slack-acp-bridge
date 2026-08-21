@@ -30,7 +30,7 @@ export interface ConfigFile {
   };
   /** Agent used for new sessions (a key of `agents`; "claude" is built in). */
   agent?: string;
-  agents?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  agents?: Record<string, { command: string; args?: string[]; env?: Record<string, string>; permissionMode?: string }>;
   /** Per-channel default agent: channel id → agent name. */
   channelAgents?: Record<string, string>;
   /** Working directory every session runs in. */
@@ -190,7 +190,7 @@ export function loadConfig(opts: LoadOptions = {}): BridgeConfig {
   const agents: Record<string, AgentConfig> = { claude: bundledClaudeAgent() };
   for (const [name, a] of Object.entries(file.agents ?? {})) {
     if (!a || typeof a.command !== "string" || !a.command) throw new Error(`config: agents.${name}.command is required`);
-    agents[name] = { name, command: a.command, args: a.args ?? [], env: a.env };
+    agents[name] = { name, command: a.command, args: a.args ?? [], env: a.env, permissionMode: a.permissionMode };
   }
   const defaultAgent = env.AGENT ?? file.agent ?? "claude";
   if (!agents[defaultAgent]) {
@@ -250,7 +250,9 @@ export function redactConfig(c: BridgeConfig): Record<string, unknown> {
     ...rest,
     slackBotToken: mask(slackBotToken),
     slackAppToken: mask(slackAppToken),
-    agents: Object.fromEntries(Object.entries(agents).map(([k, a]) => [k, { command: a.command, args: a.args }])),
+    agents: Object.fromEntries(
+      Object.entries(agents).map(([k, a]) => [k, { command: a.command, args: a.args, ...(a.permissionMode ? { permissionMode: a.permissionMode } : {}) }]),
+    ),
   };
 }
 

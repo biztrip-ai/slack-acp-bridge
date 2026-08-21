@@ -7,7 +7,11 @@
   "agents": {
     "codex": {
       "command": "codex-acp",
-      "args": []
+      "args": [
+        "-c",
+        "model=\"gpt-5.5\""
+      ],
+      "permissionMode": "full-access"
     },
     "gemini": {
       "command": "gemini",

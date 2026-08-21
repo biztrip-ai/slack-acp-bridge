@@ -79,9 +79,13 @@ export class AgentProcess {
   private async start(): Promise<void> {
     const { command, args = [], env } = this.config;
     this.log.info("spawning", command, args.join(" "));
+    // Own process group: some agents are launched through a shim (e.g. the
+    // codex-acp npm wrapper) whose native child would otherwise outlive it and
+    // keep our pipes open. stop() kills the whole group.
     const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...env },
+      detached: process.platform !== "win32",
     });
     this.child = child;
     this.sinks.clear();
@@ -199,15 +203,29 @@ export class AgentProcess {
     if (!child || child.exitCode !== null) return;
     this.stopping = true;
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    const signalGroup = (sig: NodeJS.Signals) => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, sig);
+        else child.kill(sig);
+      } catch {
+        /* already gone */
+      }
+    };
     try {
       child.stdin?.end();
     } catch {
       /* ignore */
     }
-    const t = setTimeout(() => child.kill("SIGTERM"), 2000);
-    const k = setTimeout(() => child.kill("SIGKILL"), 6000);
+    const t = setTimeout(() => signalGroup("SIGTERM"), 2000);
+    const k = setTimeout(() => signalGroup("SIGKILL"), 6000);
     await exited;
     clearTimeout(t);
     clearTimeout(k);
+    // Make sure nothing in the group survives and release our pipe ends so the
+    // event loop can drain even if a grandchild lingered.
+    signalGroup("SIGKILL");
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    child.stdin?.destroy();
   }
 }
