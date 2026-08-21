@@ -29,7 +29,7 @@
       "project",
       "local"
     ],
-    "chrome": false
+    "chrome": true
   },
   "ambient": false,
   "silentSentinel": "<<SILENT>>",

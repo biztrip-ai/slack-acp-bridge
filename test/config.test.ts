@@ -18,6 +18,7 @@ describe("config.json loading", () => {
     expect(c.slackBotToken).toBe("xoxb-file");
     expect(c.cwd).toBe(process.cwd());
     expect(c.permissionMode).toBe("bypassPermissions");
+    expect(c.claude.chrome).toBe(true);
     expect(c.sessionIdleTimeoutS).toBe(14400);
     expect(c.configPath).toContain("a.json");
   });
