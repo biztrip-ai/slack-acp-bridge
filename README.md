@@ -53,8 +53,6 @@ Slack ──Socket Mode──▶ slack-acp-bridge ──stdio/ACP──▶ claud
   `bypassPermissions` (the default) skips prompts entirely for trusted setups.
 - **Per-thread modes**, persisted: `/mode acceptEdits` in one thread doesn't
   affect others, and survives restarts and agent switches.
-- **Credentials stay in the bridge.** The agent never receives the Slack tokens:
-  uploads and messages it requests go through a unix socket to the bridge.
 
 ### Commands
 
@@ -72,17 +70,20 @@ scope and in Slack-compatible servers that lack slash commands.
 - **Per-thread and per-channel selection.** `/agent codex` switches a thread
   (starting a fresh session); `channelAgents` sets a default per channel.
 
-### Rich media, both directions
+### Media inputs and outputs
 
-- **Inbound:** files posted in a thread or DM reach the agent — images as inline
-  image content, everything else saved to disk and passed as a `resource_link`
-  the agent can read.
-- **Outbound:** each session gets a **Slack MCP server** with
-  `slack_upload_file` and `slack_post_message`, scoped to its own thread, so the
-  agent can drop screenshots, PDFs or logs into the conversation and post
-  progress notes mid-task. Agents without MCP support can print
-  `ATTACH: /path/to/file` instead; the line is stripped from the reply and the
-  file uploaded when the turn ends.
+Slack conversations aren't text-only, and neither is the bridge.
+
+- **Media in.** Images, screenshots, PDFs, logs and any other files posted in a
+  thread or DM are passed to the agent with the message: images as inline image
+  content it can look at directly, everything else saved to disk and handed
+  over as a `resource_link` it can open and read.
+- **Media out.** Every session gets its own **Slack MCP server** with
+  `slack_upload_file` and `slack_post_message`, scoped to that thread, so the
+  agent can drop a screenshot, a generated PDF, a diff or a log file straight
+  into the conversation and post progress notes mid-task. Agents without MCP
+  support print `ATTACH: /path/to/file` instead; the line is stripped from the
+  reply and the file is uploaded when the turn ends.
 
 ### Ambient mode
 
