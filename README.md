@@ -186,6 +186,67 @@ anyone in the thread can click; unanswered prompts cancel after
 `PERMISSION_TIMEOUT_S`. Requests for threads the bridge can't map (shouldn't
 happen) fall back to auto-allow.
 
+## Agent instructions
+
+Setting this up is a good job for a coding agent (Claude Code, Codex, …) running
+on the machine that will host the bridge. Paste the block below into the agent.
+The only steps a human must do by hand are the ones involving Slack tokens.
+
+````text
+Set up slack-acp-bridge on this machine: a Slack bot that relays Slack threads to
+a local coding agent over ACP. Work through these steps in order and verify each.
+
+1. Prerequisites
+   - Node >= 22.13 (`node --version`).
+   - The `claude` CLI installed and logged in: `claude -p "say ok"` must answer
+     without prompting. If it doesn't, stop and ask me to run `claude` and log in.
+   - `npm install -g slack-acp-bridge`; confirm with `slack-acp-bridge help`.
+
+2. Slack app
+   - Run `slack-acp-bridge manifest --name <BOT NAME> --steps` and save the JSON
+     to a file. Ask me which bot name to use if I haven't said.
+   - Tell me to: open https://api.slack.com/apps -> Create New App -> From a
+     manifest -> pick the workspace -> paste that JSON -> Create. Then
+     Basic Information -> App-Level Tokens -> Generate Token and Scopes with scope
+     connections:write (copy the xapp-... token), then Install App -> Install to
+     Workspace (copy the xoxb-... Bot User OAuth Token).
+   - Do NOT ask me to paste tokens into the chat and never put them on a command
+     line. Instead, run `slack-acp-bridge init` (creates
+     ~/.config/slack-acp-bridge/config.json, mode 600) and tell me to edit that
+     file and fill in slack.botToken and slack.appToken myself.
+
+3. Configuration (~/.config/slack-acp-bridge/config.json)
+   - cwd: the directory the agent should work in (ask me; a repo checkout is
+     typical). permissionMode: keep "bypassPermissions" unless I ask for
+     approvals in Slack; then use "acceptEdits" or "default".
+   - Optional: if I want Codex as well, `npm install -g @zed-industries/codex-acp`
+     and add under agents:
+       "codex": { "command": "<absolute path of codex-acp>",
+                  "args": ["-c", "model=\"gpt-5.5\""], "permissionMode": "full-access" }
+     (codex-acp bundles its own Codex core; pin a model it supports.)
+   - Run `slack-acp-bridge config` and check the resolved values; tokens must
+     show as "xoxb-..." / "xapp-..." (they are redacted), not "(unset)".
+
+4. Run
+   - Start it: `slack-acp-bridge > ~/slack-acp-bridge.log 2>&1 &`
+     On macOS prefer `caffeinate -dimsu -- slack-acp-bridge ...` so the socket
+     connection isn't paused by App Nap. The process title is "slack-acp-bridge",
+     so `pkill -f slack-acp-bridge` restarts it cleanly.
+   - Wait for the log line "connected; bot user U...; waiting for events".
+     "invalid_auth" / "not_authed" means a token is wrong; "missing_scope" after a
+     manifest change means the app must be reinstalled (OAuth & Permissions ->
+     Reinstall to Workspace).
+   - Tell me to invite the bot to a channel (`/invite @<BOT NAME>`) and mention it
+     with a trivial request. Confirm from the log that a session was created and
+     the turn ended with stop=end_turn, and that the reply appeared in Slack.
+
+5. Hand-off
+   - Summarise: where the config and log live, how to restart, and the commands
+     users can type in a thread: /clear, /stop, /agent [name], /mode [id], /help
+     (also !clear, !stop, ... inside a message).
+   - If anything failed, show me the relevant log lines rather than guessing.
+````
+
 ## Rich media from the agent
 
 Two mechanisms, both on by default and both explained to the agent in its
