@@ -11,6 +11,7 @@ import {
 } from "./config.js";
 import { AgentHost } from "./host/host.js";
 import { createLogger, setLogLevel } from "./logger.js";
+import { buildAvatarPng } from "./avatar.js";
 import { buildManifest, SETUP_STEPS } from "./manifest.js";
 import { SlackBridge } from "./slack/app.js";
 
@@ -27,6 +28,7 @@ Commands:
   init        write a config.json template (--bot-token, --app-token, --force)
   config      print the resolved configuration (tokens redacted) and paths
   manifest    print the Slack app manifest JSON (--name <app name>, --description <text>, --steps)
+  avatar      write the default bot avatar PNG (--out <file>, default ./avatar.png; --bg/--fg hex colours)
   help        show this message
 `;
 
@@ -45,6 +47,9 @@ async function cli(argv: string[]): Promise<BridgeConfig | undefined> {
       description: { type: "string" },
       steps: { type: "boolean" },
       "bot-token": { type: "string" },
+      out: { type: "string" },
+      bg: { type: "string" },
+      fg: { type: "string" },
       "app-token": { type: "string" },
       force: { type: "boolean" },
       help: { type: "boolean", short: "h" },
@@ -62,6 +67,12 @@ async function cli(argv: string[]): Promise<BridgeConfig | undefined> {
       process.stdout.write(JSON.stringify(buildManifest({ name: values.name, description: values.description }), null, 2) + "\n");
       if (values.steps) process.stderr.write("\n" + SETUP_STEPS);
       return undefined;
+    case "avatar": {
+      const out = values.out ?? "avatar.png";
+      fs.writeFileSync(out, buildAvatarPng({ bg: values.bg, fg: values.fg }));
+      process.stdout.write(`wrote ${out} (512x512 PNG) — upload it at api.slack.com/apps → your app → Basic Information → Display Information → App icon\n`);
+      return undefined;
+    }
     case "config": {
       const cfg = loadConfig({ configPath: values.config, allowMissingTokens: true });
       process.stdout.write(

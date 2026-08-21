@@ -35,9 +35,11 @@ a local coding agent over ACP). Verify each step before moving on.
    the name). The steps are: api.slack.com/apps -> Create New App -> From a
    manifest -> paste the JSON -> Create; Basic Information -> App-Level Tokens ->
    generate one with scope connections:write (xapp-...); Install App -> Install to
-   Workspace (xoxb-...). If you have browser control, offer to drive these steps
-   yourself in my logged-in browser; otherwise give me the JSON and the steps.
-   Either way, leave copying the tokens to me.
+   Workspace (xoxb-...). Also give the bot an avatar: `slack-acp-bridge avatar
+   --out avatar.png` writes one; it is uploaded under Basic Information ->
+   Display Information -> App icon. If you have browser control, offer to drive
+   all of these steps yourself in my logged-in browser; otherwise give me the
+   JSON, the avatar file and the steps. Either way, leave copying the tokens to me.
 
 3. Config: run `slack-acp-bridge init`, then ask me to put the two tokens into
    ~/.config/slack-acp-bridge/config.json myself (slack.botToken, slack.appToken).
@@ -92,6 +94,13 @@ the Socket Mode heartbeat.
 2. **Basic Information → App-Level Tokens** → create one with
    `connections:write` → `SLACK_APP_TOKEN` (`xapp-…`).
 3. **Install App** → `SLACK_BOT_TOKEN` (`xoxb-…`). Invite the bot to channels.
+4. Optional but worth it: give the bot a face. `slack-acp-bridge avatar --out avatar.png`
+   writes a default icon (below); upload it under **Basic Information → Display
+   Information → App icon**. Manifests can't carry icons, and there is no API for
+   them, so this is always a UI step. Pass `--bg`/`--fg` for your own colours, or
+   use any square PNG ≥ 512 px.
+
+   <img src="https://raw.githubusercontent.com/biztrip-ai/slack-acp-bridge/main/docs/avatar.png" width="96" alt="default avatar">
 
 Changing scopes or events later requires reinstalling the app.
 

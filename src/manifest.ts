@@ -64,7 +64,10 @@ export const SETUP_STEPS = `Slack app setup
    add scope connections:write → Generate. Copy the xapp-… token → SLACK_APP_TOKEN.
 4. "Install App" → "Install to Workspace" → Allow. Copy the xoxb-… Bot User
    OAuth Token → SLACK_BOT_TOKEN.
-5. Invite the bot to the channels you want it in: /invite @<bot name>.
+5. Give it an avatar: \`slack-acp-bridge avatar --out avatar.png\` writes a default
+   icon; upload it under Basic Information → Display Information → App icon
+   (any square PNG ≥ 512px works — manifests can't carry icons).
+6. Invite the bot to the channels you want it in: /invite @<bot name>.
 
 Changing scopes or events later requires "Reinstall to Workspace".
 `;
