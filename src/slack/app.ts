@@ -345,7 +345,7 @@ export class SlackBridge {
           }
         } else if (e.kind === "done") stop = e.stopReason;
       }
-      streamer.clearStatus();
+      streamer.clearStatus(); // the turn is over; the final flush renders text only
       if (attach) await streamer.append(abstain ? abstain.feed(attach.finish()) : attach.finish());
       if (abstain) {
         const { abstained, tail } = abstain.finish();

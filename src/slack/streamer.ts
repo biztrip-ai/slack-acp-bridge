@@ -41,7 +41,7 @@ export class SlackStreamer {
   private lastFlushedLen = 0;
   private lastFlushAt = -Infinity;
   private placeholder: string;
-  /** Latest tool activity, shown under the body while the agent works; cleared when text resumes. */
+  /** Latest tool activity, shown under the body until the next tool call or the end of the turn. */
   private status = "";
   private pendingFlush?: NodeJS.Timeout;
   private readonly lazy: boolean;
@@ -90,7 +90,6 @@ export class SlackStreamer {
 
   async append(text: string): Promise<void> {
     if (!text) return;
-    this.status = "";
     // Spread `text` across as many messages as needed so no single Slack
     // message exceeds MAX_MSG_CHARS (a whole reply can arrive in one chunk).
     while (text) {
@@ -113,7 +112,7 @@ export class SlackStreamer {
     await this.flush();
   }
 
-  /** Show what the agent is doing right now (e.g. "💻 npm test"). No-op if unchanged. */
+  /** Show what the agent is doing right now (e.g. "🔧 npm test"). No-op if unchanged. */
   async setStatus(label: string): Promise<void> {
     if (!label || label === this.status) return;
     this.status = label;

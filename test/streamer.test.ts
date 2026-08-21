@@ -105,21 +105,21 @@ describe("SlackStreamer lazy mode", () => {
 });
 
 describe("SlackStreamer status line", () => {
-  it("renders the status under the body and clears it when text resumes", async () => {
+  it("keeps the status under the body until the next tool or the turn ends", async () => {
     const slack = new FakeSlack();
     let t = 0;
     const s = new SlackStreamer(slack, "C1", "1.0", log, { now: () => t });
     await s.open();
-    await s.setStatus("💻 npm test");
-    expect(slack.updates.at(-1)!.text).toBe("_💻 npm test_");
+    await s.setStatus("🔧 npm test");
+    expect(slack.updates.at(-1)!.text).toBe("_🔧 npm test_");
     t = 2000;
     await s.append("Tests pass.\n");
     await s.flush(true);
-    expect(slack.updates.at(-1)!.text).toBe("Tests pass.");
+    expect(slack.updates.at(-1)!.text).toBe("Tests pass.\n\n_🔧 npm test_"); // text doesn't clear it
     t = 4000;
-    await s.setStatus("📄 Read app.ts");
-    expect(slack.updates.at(-1)!.text).toBe("Tests pass.\n\n_📄 Read app.ts_");
-    await s.setStatus("📄 Read app.ts"); // unchanged → no extra update
+    await s.setStatus("🔧 Read app.ts");
+    expect(slack.updates.at(-1)!.text).toBe("Tests pass.\n\n_🔧 Read app.ts_");
+    await s.setStatus("🔧 Read app.ts"); // unchanged → no extra update
     const n = slack.updates.length;
     s.clearStatus();
     await s.flush(true);
