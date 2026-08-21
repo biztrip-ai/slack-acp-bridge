@@ -41,6 +41,9 @@ export class SlackStreamer {
   private lastFlushedLen = 0;
   private lastFlushAt = -Infinity;
   private placeholder: string;
+  /** Latest tool activity, shown under the body while the agent works; cleared when text resumes. */
+  private status = "";
+  private pendingFlush?: NodeJS.Timeout;
   private readonly lazy: boolean;
   private readonly now: () => number;
 
@@ -87,19 +90,56 @@ export class SlackStreamer {
 
   async append(text: string): Promise<void> {
     if (!text) return;
-    if (this.body.length + text.length > MAX_MSG_CHARS) {
+    this.status = "";
+    // Spread `text` across as many messages as needed so no single Slack
+    // message exceeds MAX_MSG_CHARS (a whole reply can arrive in one chunk).
+    while (text) {
+      const capacity = MAX_MSG_CHARS - this.body.length;
+      if (capacity <= 0) {
+        await this.flush(true);
+        await this.rollOver();
+        continue;
+      }
+      if (text.length <= capacity) {
+        this.body += text;
+        break;
+      }
+      const cut = splitPoint(text, capacity);
+      this.body += text.slice(0, cut);
+      text = text.slice(cut);
       await this.flush(true);
       await this.rollOver();
     }
-    this.body += text;
     await this.flush();
   }
 
-  async flush(force = false): Promise<void> {
+  /** Show what the agent is doing right now (e.g. "💻 npm test"). No-op if unchanged. */
+  async setStatus(label: string): Promise<void> {
+    if (!label || label === this.status) return;
+    this.status = label;
+    await this.flush(false, true);
+  }
+
+  /** Drop the status line without a network call (the next flush renders without it). */
+  clearStatus(): void {
+    this.status = "";
+  }
+
+  private render(): string {
+    const body = this.body.trim();
+    if (this.status) return body ? `${body}\n\n_${this.status}_` : `_${this.status}_`;
+    return body || this.placeholder;
+  }
+
+  async flush(force = false, forceStatus = false): Promise<void> {
+    if (this.pendingFlush) {
+      clearTimeout(this.pendingFlush);
+      this.pendingFlush = undefined;
+    }
     if (!this.ts) {
-      // Lazy mode: create the message with the first real text.
+      // Lazy mode: create the message with the first real text (never for a status alone).
       if (!this.body.trim()) return;
-      const r = await this.client.chat.postMessage({ channel: this.channel, thread_ts: this.threadTs, text: this.body });
+      const r = await this.client.chat.postMessage({ channel: this.channel, thread_ts: this.threadTs, text: this.render() });
       this.ts = r.ts;
       this.lastFlushedLen = this.body.length;
       this.lastFlushAt = this.now();
@@ -108,11 +148,17 @@ export class SlackStreamer {
     const now = this.now();
     const delta = this.body.length - this.lastFlushedLen;
     if (!force) {
-      if (delta < MIN_FLUSH_DELTA) return;
-      if (now - this.lastFlushAt < MIN_UPDATE_INTERVAL_MS) return;
+      if (!forceStatus && delta < MIN_FLUSH_DELTA) return;
+      const wait = MIN_UPDATE_INTERVAL_MS - (now - this.lastFlushAt);
+      if (wait > 0) {
+        // Inside the rate-limit window: deliver this update when it opens, so a
+        // status set during a quiet spell isn't lost.
+        this.pendingFlush = setTimeout(() => void this.flush(true), wait);
+        this.pendingFlush.unref?.();
+        return;
+      }
     }
-    if (delta === 0 && this.lastFlushedLen > 0) return;
-    const rendered = this.body.trim() || this.placeholder;
+    const rendered = this.render();
     try {
       await this.client.chat.update({ channel: this.channel, ts: this.ts, text: rendered });
       this.lastFlushedLen = this.body.length;
@@ -142,6 +188,7 @@ export class SlackStreamer {
   }
 
   private async rollOver(): Promise<void> {
+    this.status = "";
     const r = await this.client.chat.postMessage({ channel: this.channel, thread_ts: this.threadTs, text: "…" });
     this.ts = r.ts;
     this.body = "";
@@ -162,4 +209,14 @@ export class SlackStreamer {
       this.log.warn("chat.update (replaceWith) failed", e);
     }
   }
+}
+
+/** Cut `text` at the last paragraph/line/word boundary within `capacity`. */
+function splitPoint(text: string, capacity: number): number {
+  const window = text.slice(0, capacity);
+  for (const sep of ["\n\n", "\n", " "]) {
+    const idx = window.lastIndexOf(sep);
+    if (idx > 0) return idx + sep.length;
+  }
+  return capacity;
 }

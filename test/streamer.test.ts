@@ -101,3 +101,38 @@ describe("SlackStreamer lazy mode", () => {
     expect(slack.updates.at(-1)!.text).toBe("hello world");
   });
 });
+
+describe("SlackStreamer status line", () => {
+  it("renders the status under the body and clears it when text resumes", async () => {
+    const slack = new FakeSlack();
+    let t = 0;
+    const s = new SlackStreamer(slack, "C1", "1.0", log, { now: () => t });
+    await s.open();
+    await s.setStatus("💻 npm test");
+    expect(slack.updates.at(-1)!.text).toBe("_💻 npm test_");
+    t = 2000;
+    await s.append("Tests pass.\n");
+    await s.flush(true);
+    expect(slack.updates.at(-1)!.text).toBe("Tests pass.");
+    t = 4000;
+    await s.setStatus("📄 Read app.ts");
+    expect(slack.updates.at(-1)!.text).toBe("Tests pass.\n\n_📄 Read app.ts_");
+    await s.setStatus("📄 Read app.ts"); // unchanged → no extra update
+    const n = slack.updates.length;
+    s.clearStatus();
+    await s.flush(true);
+    expect(slack.updates.length).toBe(n + 1);
+    expect(slack.updates.at(-1)!.text).toBe("Tests pass.");
+  });
+
+  it("splits an oversized single chunk across messages at a boundary", async () => {
+    const slack = new FakeSlack();
+    const s = new SlackStreamer(slack, "C1", "1.0", log, { now: () => 0 });
+    await s.open();
+    const para = "word ".repeat(300).trim(); // ~1500 chars
+    await s.append(`${para}\n\n${para}\n\n${para}`);
+    await s.flush(true);
+    expect(slack.posts.length).toBeGreaterThanOrEqual(2);
+    for (const u of slack.updates) expect(u.text.length).toBeLessThanOrEqual(MAX_MSG_CHARS + 2);
+  });
+});

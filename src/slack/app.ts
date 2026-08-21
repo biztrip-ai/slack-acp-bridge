@@ -14,6 +14,7 @@ import { HELP_TEXT, parseBangCommand, type CommandName } from "./commands.js";
 import { attachmentsToBlocks, type SlackFile } from "./files.js";
 import { PERMISSION_ACTION_PREFIX, PermissionPrompter } from "./permissions.js";
 import { SlackStreamer } from "./streamer.js";
+import { toolLabel } from "./tool-label.js";
 
 const { App, LogLevel } = bolt;
 
@@ -327,11 +328,24 @@ export class SlackBridge {
         return t;
       };
       let stop = "end_turn";
+      const labels = new Map<string, string>(); // tool call id → label (titles can arrive in updates)
       for await (const e of session.send(prompt)) {
         if (e.kind === "turn_start") await streamer.markActive();
         else if (e.kind === "text") await streamer.append(pipe(e.text));
-        else if (e.kind === "done") stop = e.stopReason;
+        else if (e.kind === "tool_call") {
+          const label = toolLabel(e);
+          labels.set(e.id, label);
+          await streamer.setStatus(label);
+        } else if (e.kind === "tool_update" && e.title && labels.has(e.id)) {
+          // The agent refined the title (e.g. the actual command) after the call started.
+          const label = toolLabel({ kind: "tool_call", id: e.id, title: e.title });
+          if (label !== labels.get(e.id)) {
+            labels.set(e.id, label);
+            await streamer.setStatus(label);
+          }
+        } else if (e.kind === "done") stop = e.stopReason;
       }
+      streamer.clearStatus();
       if (attach) await streamer.append(abstain ? abstain.feed(attach.finish()) : attach.finish());
       if (abstain) {
         const { abstained, tail } = abstain.finish();
