@@ -226,7 +226,7 @@ export function loadConfig(opts: LoadOptions = {}): BridgeConfig {
     claude: {
       model: env.CLAUDE_MODEL || file.claude?.model || undefined,
       settingSources: splitList(env.CLAUDE_SETTING_SOURCES) ?? file.claude?.settingSources ?? ["user", "project", "local"],
-      chrome: env.CLAUDE_CHROME !== undefined ? truthy(env.CLAUDE_CHROME) : (file.claude?.chrome ?? false),
+      chrome: env.CLAUDE_CHROME !== undefined ? truthy(env.CLAUDE_CHROME) : (file.claude?.chrome ?? true),
     },
     systemPromptAppend,
     ambient,
@@ -263,7 +263,7 @@ export function configTemplate(tokens: { botToken?: string; appToken?: string } 
     channelAgents: {},
     permissionMode: "bypassPermissions",
     permissionTimeoutS: 600,
-    claude: { settingSources: ["user", "project", "local"], chrome: false },
+    claude: { settingSources: ["user", "project", "local"], chrome: true },
     ambient: false,
     silentSentinel: "<<SILENT>>",
     session: { idleTimeoutS: 14400, reapIntervalS: 300 },

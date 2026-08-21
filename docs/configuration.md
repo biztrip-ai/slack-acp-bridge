@@ -16,7 +16,7 @@ except the Slack tokens. See [`config.example.json`](../config.example.json).
 | `permissionTimeoutS` | `600` | `PERMISSION_TIMEOUT_S` | unanswered prompts are cancelled after this |
 | `claude.model` | agent default | `CLAUDE_MODEL` | Claude only |
 | `claude.settingSources` | `["user","project","local"]` | `CLAUDE_SETTING_SOURCES` | which `~/.claude` / project config layers Claude loads |
-| `claude.chrome` | `false` | `CLAUDE_CHROME` | spawn Claude with `--chrome` |
+| `claude.chrome` | `true` | `CLAUDE_CHROME` | spawn Claude with `--chrome` (Claude-in-Chrome browser tools); set `false` to disable |
 | `systemPromptAppend` | Slack-mrkdwn guidance | `SYSTEM_PROMPT_APPEND` | `""` disables |
 | `ambient` | `false` | `AMBIENT` | follow un-addressed thread replies; agent may abstain |
 | `silentSentinel` | `<<SILENT>>` | `SILENT_SENTINEL` | |
